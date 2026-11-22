@@ -121,6 +121,10 @@ h1 span { color: var(--coral); }
 .hours em { font-style: normal; color: var(--foam); font-weight: 700; }
 .mode { display: grid; grid-template-columns: 1fr 1fr; background: var(--deck); border: 1.5px solid var(--line); border-radius: 14px; padding: 4px; gap: 4px; }
 .mode button { appearance: none; border: 0; border-radius: 10px; padding: 9px; font: 700 .95rem var(--body); background: transparent; color: var(--mist); }
+.mode.three { grid-template-columns: 1fr 1fr 1fr; }
+.wahlrow select { width: 100%; appearance: none; border: 1.5px solid var(--line); background: var(--night); color: var(--foam); border-radius: 12px; padding: 11px 12px; font: 600 1rem var(--body); }
+.wahlrow { display: grid; gap: 4px; padding: 8px 0; }
+.ver { cursor: pointer; }
 .mode button.on { background: var(--sea); color: var(--ink); }
 .orow { display: flex; gap: 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .cnt { font: 800 2rem var(--display); color: var(--gold); min-width: 52px; font-variant-numeric: tabular-nums; }
@@ -222,7 +226,7 @@ input[type=text] {
   </div>
   <div id="rateCard"></div>
 
-  <div class="mode" id="modeSw" role="group" aria-label="Spielmodus"><button type="button" data-mode="single">Einzeln</button><button type="button" data-mode="round">Runde (alle)</button></div>
+  <div class="mode" id="modeSw" role="group" aria-label="Spielmodus"><button type="button" data-mode="single">Einzeln</button><button type="button" data-mode="round">Runde (alle)</button><button type="button" data-mode="wahl" hidden>Wahlrunde</button></div>
   <button class="spin" id="spinBtn" type="button">Drehen!</button>
 
   <div class="tools">
@@ -410,7 +414,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "8"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "9"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 const NAMES = ["Christoph","Mark","Tim","Julian"];
 const DEFAULT = () => ({
@@ -553,6 +557,7 @@ async function spin() {
   if (!S.players.length) { openSheet("players"); return; }
   if (!enabled().length) { toast("Kein Drink passt zum Filter. Bitte Filter lockern."); openSheet("filter"); return; }
   if (S.mode === "round") return spinRound();
+  if (S.mode === "wahl") return openWahl();
   const p = player();
   setBusy(true);
   const d = await spinFor(p, 4800);
@@ -601,6 +606,7 @@ function showOrder(rid) {
   $("#oRedo").onclick = () => {
     S.history.filter(h => h.rid === rid).forEach(h => { const p = S.players.find(x => x.id === h.pid); if (p) { const k = p.seen.lastIndexOf(h.id); if (k >= 0) p.seen.splice(k, 1); } });
     S.history = S.history.filter(h => h.rid !== rid); S.cur = 0; save(); toast("Runde zurückgenommen."); closeSheet();
+    if (rid[0] === "w") openWahl();
   };
 }
 function refillSegsWith(winner, pool) {
@@ -629,13 +635,15 @@ function renderTop() {
   ).join("") + `<button class="chip add" type="button" data-open="players">+ Spieler</button>`;
   renderRateCard();
   document.querySelectorAll("#modeSw button").forEach(b => b.classList.toggle("on", b.dataset.mode === (S.mode || "single")));
-  $("#spinBtn").textContent = S.mode === "round" ? "Runde drehen!" : "Drehen!";
+  if (S.mode === "wahl" && !S.wahlOn) S.mode = "single";
+  const wb = document.querySelector('#modeSw [data-mode="wahl"]'); wb.hidden = !S.wahlOn; $("#modeSw").classList.toggle("three", !!S.wahlOn);
+  $("#spinBtn").textContent = S.mode === "round" ? "Runde drehen!" : S.mode === "wahl" ? "Wahlrunde starten" : "Drehen!";
   const p = player();
   const en = enabled();
   if (!p) { $("#turnName").textContent = "Erst Spieler eintragen"; $("#turnLeft").textContent = ""; }
   else {
     const left = poolFor(p).length;
-    $("#turnName").textContent = S.mode === "round" ? `Runde für alle ${S.players.length}` : `${p.name} ist dran`;
+    $("#turnName").textContent = S.mode === "round" ? `Runde für alle ${S.players.length}` : S.mode === "wahl" ? `Wahlrunde: jeder wählt selbst` : `${p.name} ist dran`;
     $("#turnLeft").textContent = left
       ? `Noch ${left} von ${en.length} Drinks offen`
       : `Alle ${en.length} Drinks durch – nächster Dreh startet neu`;
@@ -650,7 +658,7 @@ function starsHTML(h, big) {
 function renderRateCard() {
   const el = $("#rateCard");
   let p = player();
-  if (S.mode === "round") p = S.players.find(q => { const x = S.history.find(y => y.pid === q.id); return x && !x.r; }) || p;
+  if (S.mode === "round" || S.mode === "wahl") p = S.players.find(q => { const x = S.history.find(y => y.pid === q.id); return x && !x.r; }) || p;
   const h = p && S.history.find(x => x.pid === p.id);
   if (!h || h.r || !BY_ID[h.id]) { el.innerHTML = ""; return; }
   el.innerHTML = `<div class="ratecard"><div class="grow"><b>${esc(p.name)}, wie war ${esc(BY_ID[h.id].name)}?</b><div class="muted">Kurz bewerten vor dem nächsten Dreh</div></div>${starsHTML(h)}</div>`;
@@ -1215,6 +1223,44 @@ document.getElementById("roomBtn").addEventListener("click", openRoomSheet);
   if (SY.code) { syncSoon(300); pollRev(); }
 })();
 
+
+// ---------- Wahlrunde (freischalten mit Code 0000) ----------
+function openWahl() {
+  if (spinning) return;
+  if (!S.players.length) { openSheet("players"); return; }
+  const en = enabled();
+  const groups = Object.keys(CATS).map(c => [c, en.filter(d => d.cat === c)]).filter(([, ds]) => ds.length);
+  const opts = p => `<option value="">– aussetzen –</option>` + groups.map(([c, ds]) => `<optgroup label="${esc(CATS[c])}">${ds.map(d => `<option value="${esc(d.id)}">${p.seen.includes(d.id) ? "✓ " : ""}${esc(d.name)}${d.price ? " (" + esc(d.price) + ")" : ""}</option>`).join("")}</optgroup>`).join("");
+  sheet("Wahlrunde", `<p class="muted">Jeder sucht sich seinen Drink selbst aus. ✓ = hatte er schon. Zählt danach wie gedreht in Verlauf, Statistik und Abhaken.</p>
+    ${S.players.map((p, i) => `<label class="wahlrow"><b>${esc(p.name)}</b><select data-wp="${i}">${opts(p)}</select></label>`).join("")}
+    <div class="actions" style="margin-top:14px"><button class="btn pri" type="button" id="wahlGo">Bestellung zeigen</button></div>`);
+  $("#wahlGo").onclick = () => {
+    const picks = [...overlay.querySelectorAll("[data-wp]")].map(sel => ({ p: S.players[+sel.dataset.wp], id: sel.value })).filter(x => x.p && x.id && BY_ID[x.id]);
+    if (!picks.length) { toast("Noch niemand hat was gewählt."); return; }
+    const rid = "w" + Date.now().toString(36), t0 = Date.now();
+    picks.forEach(({ p, id }, i) => {
+      if (!p.seen.includes(id)) p.seen.push(id);
+      S.history.unshift({ pid: p.id, id, t: t0 + i, rid });
+    });
+    save(); renderTop(); confetti(); showOrder(rid);
+  };
+}
+function openUnlock() {
+  if (spinning) return;
+  if (S.wahlOn) {
+    sheet("Wahlrunde", `<p class="muted">Die Wahlrunde ist auf diesem Handy freigeschaltet.</p><button class="btn warn" type="button" id="wahlOff">Wieder ausblenden</button>`);
+    $("#wahlOff").onclick = () => { S.wahlOn = false; if (S.mode === "wahl") S.mode = "single"; save(); toast("Wahlrunde ausgeblendet."); closeSheet(); };
+    return;
+  }
+  sheet("Code eingeben", `<form class="row" id="unlockForm"><div class="grow"><input type="text" id="unlockIn" inputmode="numeric" placeholder="Code" autocomplete="off" maxlength="8"></div><button class="btn pri" type="submit">OK</button></form>`);
+  setTimeout(() => { const x = $("#unlockIn"); x && x.focus(); }, 50);
+  $("#unlockForm").onsubmit = e => {
+    e.preventDefault();
+    if ($("#unlockIn").value.trim() === "0000") { S.wahlOn = true; S.mode = "wahl"; save(); toast("Wahlrunde freigeschaltet!"); closeSheet(); }
+    else { toast("Falscher Code."); $("#unlockIn").value = ""; }
+  };
+}
+document.getElementById("ver").addEventListener("click", openUnlock);
 // ---------- Start ----------
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · Stand 22.11.2026";
 if (fixManual()) save();
