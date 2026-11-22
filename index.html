@@ -997,7 +997,7 @@ function merge3(b, l, r) {
   return out;
 }
 
-let syncBusy = false, syncAgain = false, syncTimer = 0, pollTimer = 0, syncState = "off"; // off | ok | wait | offline | error
+let useEtag = true, syncBusy = false, syncAgain = false, syncTimer = 0, pollTimer = 0, syncState = "off"; // off | ok | wait | offline | error
 async function fb(path, opt = {}) {
   const res = await fetch(dbUrl() + "/rooms/" + encodeURIComponent(SY.code) + path + ".json", Object.assign({ cache: "no-store" }, opt));
   return res;
@@ -1014,14 +1014,16 @@ async function syncNow() {
   syncBusy = true; setSyncState("wait");
   try {
     for (let attempt = 0; attempt < 4; attempt++) {
-      const g = await fb("/data", { headers: { "X-Firebase-ETag": "true" } });
+      let g;
+      if (useEtag) { try { g = await fb("/data", { headers: { "X-Firebase-ETag": "true" } }); } catch (e) { useEtag = false; } }
+      if (!g) g = await fb("/data");
       if (!g.ok) throw new Error("get " + g.status);
-      const etag = g.headers.get("ETag");
+      const etag = useEtag && attempt < 3 ? g.headers.get("ETag") : null; // ohne ETag: einfach überschreiben (Abgleich ist trotzdem passiert)
       const remote = (await g.json()) || {};
       const local = toShared(S);
       const merged = prune(merge3(SY.base, local, remote)) || {};
       if (!same(merged, remote)) {
-        const p = await fb("/data", { method: "PUT", headers: { "Content-Type": "application/json", "if-match": etag }, body: JSON.stringify(merged) });
+        const p = await fb("/data", { method: "PUT", headers: Object.assign({ "Content-Type": "application/json" }, etag ? { "if-match": etag } : {}), body: JSON.stringify(merged) });
         if (p.status === 412) continue; // jemand war schneller -> nochmal holen und zusammenführen
         if (!p.ok) throw new Error("put " + p.status);
         SY.rev = Date.now() + "-" + Math.random().toString(36).slice(2, 6);
