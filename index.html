@@ -125,6 +125,8 @@ h1 span { color: var(--coral); }
 .wahlrow select { width: 100%; appearance: none; border: 1.5px solid var(--line); background: var(--night); color: var(--foam); border-radius: 12px; padding: 11px 12px; font: 600 1rem var(--body); }
 .wahlrow { display: grid; gap: 4px; padding: 8px 0; }
 .ver { cursor: pointer; }
+.fav { appearance: none; border: 0; background: none; font-size: 1.5rem; line-height: 1; color: var(--mist); padding: 2px 4px; }
+.fav.on { color: var(--coral); }
 .delh { padding: 6px 9px !important; font-size: .78rem !important; }
 .delh.sure { background: var(--coral); color: #fff; }
 .mode button.on { background: var(--sea); color: var(--ink); }
@@ -416,11 +418,11 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "10"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "11"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 const NAMES = ["Christoph","Mark","Tim","Julian"];
 const DEFAULT = () => ({
-  players: NAMES.map((n, i) => ({ id: "p" + i + Date.now().toString(36), name: n, seen: [] })),
+  players: NAMES.map((n, i) => ({ id: "p" + i + Date.now().toString(36), name: n, seen: [], fav: [] })),
   cur: 0,
   cats: Object.fromEntries(Object.keys(CATS).map(k => [k, true])),
   inclOnly: true,
@@ -428,11 +430,13 @@ const DEFAULT = () => ({
   v: 2,
   excluded: [],
   history: [],
+  ck: { inclOnly: false, allowAf: true, cats: Object.fromEntries(Object.keys(CATS).map(k => [k, true])) }, // Filter fürs Abhaken
 });
 let S;
 try { S = JSON.parse(localStorage.getItem(KEY)) || DEFAULT(); } catch (e) { S = DEFAULT(); }
 S = Object.assign(DEFAULT(), S);
-for (const k of Object.keys(CATS)) if (!(k in S.cats)) S.cats[k] = true;
+S.players.forEach(p => { if (!Array.isArray(p.fav)) p.fav = []; });
+for (const k of Object.keys(CATS)) { if (!(k in S.cats)) S.cats[k] = true; if (!(k in S.ck.cats)) S.ck.cats[k] = true; }
 if (S.players.length && S.players.every(p => /^Spieler \d+$/.test(p.name))) {
   S.players = DEFAULT().players; S.history = []; S.cur = 0;
 }
@@ -441,6 +445,8 @@ const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch
 
 const enabled = () => DRINKS.filter(d =>
   S.cats[d.cat] && (!S.inclOnly || !d.price) && (S.allowAf || !d.af) && !S.excluded.includes(d.id));
+const checkEnabled = () => DRINKS.filter(d =>
+  S.ck.cats[d.cat] && (!S.ck.inclOnly || !d.price) && (S.ck.allowAf || !d.af));
 const player = () => S.players[S.cur] || null;
 const poolFor = p => { const en = enabled(); return en.filter(d => !p.seen.includes(d.id)); };
 
@@ -724,7 +730,7 @@ function openSheet(which) {
     }));
     $("#addForm").addEventListener("submit", e => {
       e.preventDefault(); const n = $("#newName").value.trim(); if (!n) return;
-      S.players.push({ id: "p" + Date.now().toString(36), name: n, seen: [] }); save(); renderTop(); openSheet("players");
+      S.players.push({ id: "p" + Date.now().toString(36), name: n, seen: [], fav: [] }); save(); renderTop(); openSheet("players");
       setTimeout(() => { const x = $("#newName"); x && x.focus(); }, 50);
     });
     $("#resetAll").addEventListener("click", () => {
@@ -736,17 +742,22 @@ function openSheet(which) {
   if (which === "filter") {
     const counts = {}; DRINKS.forEach(d => counts[d.cat] = (counts[d.cat] || 0) + 1);
     const sw = (id, on, label, sub) => `<label class="row" for="${id}"><div class="grow"><b>${label}</b>${sub ? `<div class="muted">${sub}</div>` : ""}</div><span class="switch"><input type="checkbox" id="${id}" ${on ? "checked" : ""}><span></span></span></label>`;
+    const tab = S.fTab === "check" ? "check" : "rad";
+    const T = tab === "rad" ? S : S.ck;
+    const where = tab === "rad" ? "ins Rad" : "in die Abhaken-Liste";
     sheet("Filter", `
-      ${sw("f-incl", S.inclOnly, "Nur inklusive", "Drinks mit Aufpreis (z. B. Kir Royal 10,70 €) raus")}
-      ${sw("f-af", S.allowAf, "Alkoholfreie Drinks", "Mocktails mit ins Rad nehmen")}
+      <div class="mode" id="fTabs" style="margin-bottom:6px"><button type="button" data-ft="rad" class="${tab === "rad" ? "on" : ""}">Fürs Drehen</button><button type="button" data-ft="check" class="${tab === "check" ? "on" : ""}">Fürs Abhaken</button></div>
+      ${sw("f-incl", T.inclOnly, "Nur inklusive", "Drinks mit Aufpreis (z. B. Kir Royal 10,70 €) raus")}
+      ${sw("f-af", T.allowAf, "Alkoholfreie Drinks", "Mocktails mit " + where + " nehmen")}
       <div class="cathead">Kategorien</div>
-      ${Object.entries(CATS).map(([k, l]) => sw("c-" + k, S.cats[k], l, counts[k] + " Drinks")).join("")}
+      ${Object.entries(CATS).map(([k, l]) => sw("c-" + k, T.cats[k], l, counts[k] + " Drinks")).join("")}
       <p class="muted" id="fcount"></p>`);
-    const upd = () => { $("#fcount").textContent = `Im Rad: ${enabled().length} Drinks. Einzelne Drinks kannst du unter „Karte“ abwählen.`; };
+    const upd = () => { $("#fcount").textContent = tab === "rad" ? `Im Rad: ${enabled().length} Drinks. Einzelne Drinks kannst du unter „Karte“ abwählen.` : `In der Abhaken-Liste: ${checkEnabled().length} Drinks. Das Rad bleibt davon unberührt.`; };
     upd();
-    $("#f-incl").onchange = e => { S.inclOnly = e.target.checked; save(); upd(); };
-    $("#f-af").onchange = e => { S.allowAf = e.target.checked; save(); upd(); };
-    Object.keys(CATS).forEach(k => { $("#c-" + k).onchange = e => { S.cats[k] = e.target.checked; save(); upd(); }; });
+    overlay.querySelectorAll("[data-ft]").forEach(b => b.onclick = () => { S.fTab = b.dataset.ft; openSheet("filter"); });
+    $("#f-incl").onchange = e => { T.inclOnly = e.target.checked; save(); upd(); };
+    $("#f-af").onchange = e => { T.allowAf = e.target.checked; save(); upd(); };
+    Object.keys(CATS).forEach(k => { $("#c-" + k).onchange = e => { T.cats[k] = e.target.checked; save(); upd(); }; });
   }
   if (which === "mine") {
     if (!S.players.length) { sheet("Meine Drinks", `<p class="muted">Erst Spieler eintragen.</p>`); return; }
@@ -758,18 +769,28 @@ function openSheet(which) {
     const avg = rated.length ? (rated.reduce((a, h) => a + h.r, 0) / rated.length).toLocaleString("de-DE", { maximumFractionDigits: 1 }) : "–";
     if (sort === "best") hs = hs.slice().sort((a, b) => (b.r || 0) - (a.r || 0) || b.t - a.t);
     if (sort === "open") hs = hs.filter(h => !h.r);
+    const favBtn = id => { const on = p.fav.includes(id); return `<button class="fav ${on ? "on" : ""}" type="button" data-fav="${esc(id)}" aria-label="${on ? "Kein Favorit mehr" : "Als Favorit merken"}">${on ? "♥" : "♡"}</button>`; };
     const tabs = `<div class="players" style="margin-bottom:6px">${S.players.map((q, i) => `<button class="chip ${i === S.myP ? "on" : ""}" type="button" data-mp="${i}">${esc(q.name)}</button>`).join("")}</div>`;
-    const sorts = `<div class="mode" id="mySort" style="margin:10px 0 2px;grid-template-columns:1fr 1fr 1fr">${[["new", "Neueste"], ["best", "Beste"], ["open", "Unbewertet"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${sort === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
-    const items = hs.map(h => {
+    const sorts = `<div class="mode" id="mySort" style="margin:10px 0 2px;grid-template-columns:1fr 1fr 1fr 1fr">${[["new", "Neueste"], ["best", "Beste"], ["open", "Offen"], ["fav", "♥ Favs"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${sort === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
+    const favItems = () => {
+      const rows = p.fav.filter(id => BY_ID[id]).map(id => { const d = BY_ID[id]; const hs2 = S.history.filter(h => h.pid === p.id && h.id === id); const best = Math.max(0, ...hs2.map(h => h.r || 0));
+        return `<div class="row"><div class="grow"><b>${esc(d.name)}</b>${tags(d)}<div class="muted">${esc(CATS[d.cat] || "")} · ${hs2.length ? hs2.length + "× getrunken" + (best ? " · " + "★".repeat(best) : "") : "noch nicht getrunken"}</div></div>${favBtn(id)}</div>`; }).join("");
+      const opts = Object.entries(CATS).map(([c, l]) => `<optgroup label="${esc(l)}">${DRINKS.filter(d => d.cat === c && !p.fav.includes(d.id)).map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join("")}</optgroup>`).join("");
+      return `<label class="wahlrow"><span class="muted">Favorit hinzufügen</span><select id="favAdd"><option value="">Drink auswählen …</option>${opts}</select></label>${rows || `<p class="muted">Noch keine Favoriten. Herz bei einem Drink antippen oder oben einen auswählen.</p>`}`;
+    };
+    const items = sort === "fav" ? favItems() : hs.map(h => {
       const d = BY_ID[h.id];
       const t = new Date(h.t).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" });
-      return `<div class="row" style="flex-wrap:wrap"><div class="grow"><b>${esc(d.name)}</b>${tags(d)}<div class="muted">${esc(CATS[d.cat] || "")} · ${h.m ? "abgehakt " : ""}${t}</div></div>${starsHTML(h)}${delBtn(h)}</div>`;
+      return `<div class="row" style="flex-wrap:wrap"><div class="grow"><b>${esc(d.name)}</b>${tags(d)}<div class="muted">${esc(CATS[d.cat] || "")} · ${h.m ? "abgehakt " : ""}${t}</div></div><span style="display:inline-flex;align-items:center;gap:6px">${starsHTML(h)}${favBtn(h.id)}</span>${delBtn(h)}</div>`;
     }).join("");
     sheet("Meine Drinks", `${tabs}
       <div class="mysum"><div><b>${S.history.filter(h => h.pid === p.id && BY_ID[h.id]).length}</b><span>getrunken</span></div><div><b>${avg}</b><span>Ø Sterne</span></div><div><b>${S.history.filter(h => h.pid === p.id && BY_ID[h.id] && !h.r).length}</b><span>unbewertet</span></div></div>
       ${sorts}
       <p class="muted">Sterne antippen zum Bewerten oder Ändern, nochmal denselben Stern antippen löscht die Bewertung.${SY.code ? " Wird mit allen im Raum geteilt." : ""}</p>
       ${items || `<p class="muted">${sort === "open" ? "Alles bewertet. 🎉" : "Noch nichts gedreht."}</p>`}`);
+    const reopen = () => { const y = overlay.querySelector(".sheet").scrollTop; openSheet("mine"); const sh = overlay.querySelector(".sheet"); if (sh) sh.scrollTop = y; };
+    overlay.querySelectorAll("[data-fav]").forEach(b => b.onclick = () => { const id = b.dataset.fav; p.fav = p.fav.includes(id) ? p.fav.filter(x => x !== id) : [...p.fav, id]; save(); reopen(); });
+    const fa = $("#favAdd"); if (fa) fa.onchange = () => { if (fa.value && !p.fav.includes(fa.value)) { p.fav = [...p.fav, fa.value]; save(); toast("♥ gemerkt"); } reopen(); };
     overlay.querySelectorAll("[data-mp]").forEach(b => b.onclick = () => { S.myP = +b.dataset.mp; openSheet("mine"); });
     overlay.querySelectorAll("[data-ms]").forEach(b => b.onclick = () => { S.mySort = b.dataset.ms; openSheet("mine"); });
   }
@@ -860,7 +881,7 @@ function openSheet(which) {
     if (!S.players.length) { sheet("Abhaken", `<p class="muted">Erst Spieler eintragen.</p>`); return; }
     if (S.checkP == null || !S.players[S.checkP]) S.checkP = S.cur || 0;
     const p = S.players[S.checkP];
-    const en = enabled();
+    const en = checkEnabled();
     const done = en.filter(d => p.seen.includes(d.id)).length;
     const tabs = `<div class="players" style="margin-bottom:6px">${S.players.map((q, i) => `<button class="chip ${i === S.checkP ? "on" : ""}" type="button" data-cp="${i}">${esc(q.name)}</button>`).join("")}</div>`;
     const groups = Object.entries(CATS).map(([k, l]) => {
@@ -871,7 +892,8 @@ function openSheet(which) {
         return `<label class="drinkline"><input type="checkbox" data-ck="${esc(d.id)}" ${on ? "checked" : ""} aria-label="${esc(d.name)} getrunken"><div class="grow"><span class="name">${esc(d.name)}</span>${tags(d)}<div class="muted">${esc(d.ing)}</div></div></label>`;
       }).join("");
     }).join("");
-    sheet("Abhaken", `${tabs}<p class="muted"><b style="color:var(--gold);font-size:1.1rem">${done} / ${en.length}</b> Drinks im Rad schon getrunken. Abgehakte Drinks kommen für ${esc(p.name)} nicht mehr aufs Rad. Haken weg = Drink ist wieder drin und fliegt aus Verlauf und Statistik.</p>${groups}`);
+    sheet("Abhaken", `${tabs}<p class="muted"><b style="color:var(--gold);font-size:1.1rem">${done} / ${en.length}</b> Drinks schon getrunken. <a href="#" id="ckFilter" style="color:var(--sea)">Filter fürs Abhaken</a>. Abgehakte Drinks kommen für ${esc(p.name)} nicht mehr aufs Rad. Haken weg = Drink ist wieder drin und fliegt aus Verlauf und Statistik.</p>${groups}`);
+    $("#ckFilter").onclick = e => { e.preventDefault(); S.fTab = "check"; openSheet("filter"); };
     overlay.querySelectorAll("[data-cp]").forEach(b => b.onclick = () => { S.checkP = +b.dataset.cp; save(); const y = overlay.querySelector(".sheet").scrollTop; openSheet("check"); });
     overlay.querySelectorAll("[data-ck]").forEach(cb => cb.addEventListener("change", () => {
       const id = cb.dataset.ck;
@@ -1026,10 +1048,11 @@ const fk = s => encodeURIComponent(s).replace(/\./g, "%2E");
 const unfk = s => decodeURIComponent(s);
 
 function toShared(st) {
-  const o = { players: {}, seen: {}, hist: {}, rate: {}, set: { inclOnly: !!st.inclOnly, allowAf: !!st.allowAf, cats: {} }, excl: {} };
+  const o = { players: {}, seen: {}, fav: {}, hist: {}, rate: {}, set: { inclOnly: !!st.inclOnly, allowAf: !!st.allowAf, cats: {} }, excl: {} };
   st.players.forEach((p, i) => {
     o.players[p.id] = { name: p.name, o: i };
     const s = {}; p.seen.forEach(id => s[fk(id)] = true); o.seen[p.id] = s;
+    const f = {}; (p.fav || []).forEach(id => f[fk(id)] = true); o.fav[p.id] = f;
   });
   st.history.forEach(h => {
     const k = h.pid + "_" + h.t;
@@ -1037,6 +1060,8 @@ function toShared(st) {
     if (h.r) o.rate[k] = h.r;
   });
   for (const [k, v] of Object.entries(st.cats)) o.set.cats[k] = !!v;
+  o.set.ck = { inclOnly: !!st.ck.inclOnly, allowAf: !!st.ck.allowAf, cats: {} };
+  for (const [k, v] of Object.entries(st.ck.cats)) o.set.ck.cats[k] = !!v;
   st.excluded.forEach(id => o.excl[fk(id)] = true);
   return o;
 }
@@ -1044,7 +1069,7 @@ function fromShared(o, st) {
   o = o || {};
   const pl = Object.entries(o.players || {}).sort((a, b) => (a[1].o ?? 0) - (b[1].o ?? 0) || a[0].localeCompare(b[0]));
   const curId = st.players[st.cur] && st.players[st.cur].id;
-  st.players = pl.map(([id, p]) => ({ id, name: p.name || "?", seen: Object.keys((o.seen || {})[id] || {}).map(unfk) }));
+  st.players = pl.map(([id, p]) => ({ id, name: p.name || "?", seen: Object.keys((o.seen || {})[id] || {}).map(unfk), fav: Object.keys((o.fav || {})[id] || {}).map(unfk) }));
   st.cur = Math.max(0, st.players.findIndex(p => p.id === curId));
   const rate = o.rate || {};
   st.history = Object.entries(o.hist || {}).map(([k, h]) => Object.assign({ pid: h.pid, id: h.id, t: h.t }, h.rid ? { rid: h.rid } : {}, h.m ? { m: 1 } : {}, rate[k] ? { r: rate[k] } : {}))
@@ -1053,6 +1078,11 @@ function fromShared(o, st) {
   if ("inclOnly" in set) st.inclOnly = !!set.inclOnly;
   if ("allowAf" in set) st.allowAf = !!set.allowAf;
   for (const [k, v] of Object.entries(set.cats || {})) if (k in st.cats) st.cats[k] = !!v;
+  if (set.ck) {
+    if ("inclOnly" in set.ck) st.ck.inclOnly = !!set.ck.inclOnly;
+    if ("allowAf" in set.ck) st.ck.allowAf = !!set.ck.allowAf;
+    for (const [k, v] of Object.entries(set.ck.cats || {})) if (k in st.ck.cats) st.ck.cats[k] = !!v;
+  }
   st.excluded = Object.keys(o.excl || {}).map(unfk);
 }
 const isObj = v => v && typeof v === "object" && !Array.isArray(v);
@@ -1266,7 +1296,7 @@ function openWahl() {
   if (!S.players.length) { openSheet("players"); return; }
   const en = enabled();
   const groups = Object.keys(CATS).map(c => [c, en.filter(d => d.cat === c)]).filter(([, ds]) => ds.length);
-  const opts = p => `<option value="">– aussetzen –</option>` + groups.map(([c, ds]) => `<optgroup label="${esc(CATS[c])}">${ds.map(d => `<option value="${esc(d.id)}">${p.seen.includes(d.id) ? "✓ " : ""}${esc(d.name)}${d.price ? " (" + esc(d.price) + ")" : ""}</option>`).join("")}</optgroup>`).join("");
+  const opts = p => `<option value="">– aussetzen –</option>` + ((p.fav || []).filter(id => BY_ID[id]).length ? `<optgroup label="♥ Favoriten">${p.fav.filter(id => BY_ID[id]).map(id => `<option value="${esc(id)}">♥ ${esc(BY_ID[id].name)}</option>`).join("")}</optgroup>` : "") + groups.map(([c, ds]) => `<optgroup label="${esc(CATS[c])}">${ds.map(d => `<option value="${esc(d.id)}">${p.seen.includes(d.id) ? "✓ " : ""}${esc(d.name)}${d.price ? " (" + esc(d.price) + ")" : ""}</option>`).join("")}</optgroup>`).join("");
   sheet("Wahlrunde", `<p class="muted">Jeder sucht sich seinen Drink selbst aus. ✓ = hatte er schon. Zählt danach wie gedreht in Verlauf, Statistik und Abhaken.</p>
     ${S.players.map((p, i) => `<label class="wahlrow"><b>${esc(p.name)}</b><select data-wp="${i}">${opts(p)}</select></label>`).join("")}
     <div class="actions" style="margin-top:14px"><button class="btn pri" type="button" id="wahlGo">Bestellung zeigen</button></div>`);
