@@ -431,7 +431,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "14"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "15"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -627,10 +627,10 @@ function showOrder(rid) {
     </div></div></div>`;
   $("#closeX").onclick = closeSheet;
   $("#oOk").onclick = closeSheet;
-  $("#oRedo").onclick = () => {
+  $("#oRedo").onclick = () => askCode($("#oRedo"), () => {
     removeEntries(h => h.rid === rid); S.cur = 0; save(); toast("Runde zurückgenommen."); closeSheet();
     if (rid[0] === "w") openWahl();
-  };
+  });
 }
 function refillSegsWith(winner, pool) {
   const others = shuffle(pool.filter(d => d.id !== winner.id)).slice(0, MAX_SEG - 1);
@@ -733,6 +733,15 @@ function bindLogin(back) {
     if ($("#lgUser").value.trim().toLowerCase() === "christoph" && $("#lgPw").value === "0000") { filterAdmin = true; toast("Angemeldet."); back === "extras" ? openUnlock() : openSheet(back); }
     else { toast("Benutzer oder Passwort falsch."); $("#lgPw").value = ""; }
   };
+}
+// Code-Abfrage direkt unter dem Knopf (Nochmal drehen, Runde neu, Letzten Dreh rückgängig)
+function askCode(anchor, ok) {
+  const box = anchor.closest(".actions") || anchor;
+  const old = document.getElementById("codeAsk"); if (old) { old.remove(); }
+  box.insertAdjacentHTML("afterend", `<form class="row" id="codeAsk" style="border:0"><div class="grow"><input type="password" id="codeAskIn" inputmode="numeric" placeholder="Code zum Freischalten" autocomplete="off" maxlength="8"></div><button class="btn pri" type="submit">OK</button></form>`);
+  const f = document.getElementById("codeAsk"), i = document.getElementById("codeAskIn");
+  setTimeout(() => i.focus(), 50);
+  f.onsubmit = e => { e.preventDefault(); if (i.value === "0000") { f.remove(); ok(); } else { toast("Falscher Code."); i.value = ""; } };
 }
 function openSheet(which) {
   if (spinning) return;
@@ -842,7 +851,7 @@ function openSheet(which) {
       <div class="cathead">Pro Spieler</div>${per || `<p class="muted">Noch keine Spieler.</p>`}
       <div class="cathead">Zuletzt gedreht <span class="muted">(Sterne antippen zum Bewerten, falsch eingetragen? Löschen)</span></div>${items || `<p class="muted">Noch nichts gedreht.</p>`}`);
     const lr = S.history.find(h => h.rid); const ob = $("#lastOrder"); if (ob && lr) ob.onclick = () => showOrder(lr.rid);
-    const u = $("#undo"); if (u) u.onclick = () => { undo(); openSheet("history"); };
+    const u = $("#undo"); if (u) u.onclick = () => askCode(u, () => { undo(); openSheet("history"); });
     const cl = $("#cleanOld"); if (cl) cl.onclick = () => {
       if (!cl.classList.contains("sure")) { cl.classList.add("sure"); cl.textContent = "Wirklich aufräumen?"; return; }
       const n = removeEntries(orphan); save(); renderTop(); toast(n + " Einträge entfernt."); openSheet("history");
@@ -1005,11 +1014,11 @@ function showResult(p, d, h) {
     </div>
   </div></div>`;
   $("#rNext").onclick = () => closeSheet();
-  $("#rUndo").onclick = () => {
+  $("#rUndo").onclick = () => askCode($("#rUndo"), () => {
     if (h) { removeEntries(x => sameEntry(x, h)); const i = S.players.indexOf(p); if (i >= 0) S.cur = i; save(); toast("Dreh zurückgenommen."); }
     else undo();
     closeSheet();
-  };
+  });
 }
 
 // Einträge löschen: raus aus Verlauf, Statistik und Bewertung; ist der Drink für den Spieler dann
