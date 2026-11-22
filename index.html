@@ -410,7 +410,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "6"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "7"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 const NAMES = ["Christoph","Mark","Tim","Julian"];
 const DEFAULT = () => ({
@@ -1223,7 +1223,19 @@ if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
 </script>
 
 <script>
-if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+if ("serviceWorker" in navigator) {
+  const hadSW = !!navigator.serviceWorker.controller;
+  addEventListener("load", () => navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(r => {
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") r.update().catch(() => {}); });
+  }).catch(() => {}));
+  // Neue Version übernommen -> einmal neu laden (Spielstand liegt im Speicher und bleibt)
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadSW || reloaded) return;
+    const go = () => { if (reloaded) return; if (typeof spinning !== "undefined" && spinning) { setTimeout(go, 2000); return; } reloaded = true; location.reload(); };
+    go();
+  });
+}
 </script>
 </body>
 </html>
