@@ -1,5 +1,5 @@
 // Drink-Rad Offline-Cache. Bei Änderungen VERSION hochzählen.
-const VERSION = "drinkrad-v2";
+const VERSION = "drinkrad-v3";
 const FILES = ["./", "./index.html", "./manifest.json", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -9,6 +9,9 @@ self.addEventListener("activate", e => {
 });
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
+  const u = new URL(e.request.url);
+  // Raum-Abgleich (Firebase) nie aus dem Cache bedienen
+  if (u.origin !== location.origin && !/fonts\.(googleapis|gstatic)\.com$/.test(u.hostname)) return;
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then(hit => hit || fetch(e.request).then(res => {
       // Schriften von Google Fonts und eigene Dateien fürs Offline-Spielen merken
