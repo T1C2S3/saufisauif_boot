@@ -215,6 +215,8 @@ input[type=text], input[type=password] {
 .result .meta .tag { margin: 0; font-size: .8rem; padding: 4px 10px; }
 .tag.cat { background: var(--deck-2); color: var(--foam); }
 .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+.actions.three { grid-template-columns: 1fr 1fr 1.4fr; }
+.actions.three .btn { padding-left: 8px; padding-right: 8px; }
 .toast {
   position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
   background: var(--sea); color: var(--ink); font-weight: 700; padding: 12px 18px; border-radius: 14px; z-index: 40;
@@ -438,7 +440,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "18"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "19"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -628,15 +630,19 @@ function showOrder(rid) {
     ${paid.length ? `<p class="muted">${paid.length} Drink(s) mit Aufpreis.</p>` : ""}
     <div class="cathead">Wer bekommt was</div>
     ${hs.map(h => `<div class="row"><div class="grow"><b>${esc(pmap[h.pid] || "?")}</b> · ${esc(BY_ID[h.id].name)}<div class="muted">${esc(BY_ID[h.id].ing)}</div></div></div>`).join("")}
-    <div class="actions" style="margin-top:14px">
+    <div class="actions three" style="margin-top:14px">
+      <button class="btn warn" type="button" id="oCancel">Abbrechen</button>
       <button class="btn warn" type="button" id="oRedo">Runde neu</button>
       <button class="btn pri" type="button" id="oOk">Bestellt, Prost!</button>
     </div></div></div>`;
   $("#closeX").onclick = closeSheet;
   $("#oOk").onclick = closeSheet;
+  $("#oCancel").onclick = () => askCode($("#oCancel"), () => {
+    removeEntries(h => h.rid === rid); S.cur = 0; save(); toast("Runde abgebrochen."); closeSheet();
+  });
   $("#oRedo").onclick = () => askCode($("#oRedo"), () => {
-    removeEntries(h => h.rid === rid); S.cur = 0; save(); toast("Runde zurückgenommen."); closeSheet();
-    if (rid[0] === "w") openWahl();
+    removeEntries(h => h.rid === rid); S.cur = 0; save(); closeSheet();
+    if (rid[0] === "w") openWahl(); else setTimeout(spin, 250);
   });
 }
 function refillSegsWith(winner, pool) {
@@ -1030,17 +1036,20 @@ function showResult(p, d, h) {
     <div class="drink">${esc(d.name)}</div>
     <div class="ing">${esc(d.ing)}</div>
     <div class="meta"><span class="tag cat">${esc(CATS[d.cat])}</span>${d.price ? `<span class="tag price">${esc(d.price)}</span>` : `<span class="tag done">inklusive</span>`}${d.af ? `<span class="tag af">alkoholfrei</span>` : ""}</div>
-    <div class="actions">
+    <div class="actions three">
+      <button class="btn warn" type="button" id="rCancel">Abbrechen</button>
       <button class="btn warn" type="button" id="rUndo">Nochmal drehen</button>
       <button class="btn pri" type="button" id="rNext">Prost!</button>
     </div>
   </div></div>`;
   $("#rNext").onclick = () => closeSheet();
-  $("#rUndo").onclick = () => askCode($("#rUndo"), () => {
-    if (h) { removeEntries(x => sameEntry(x, h)); const i = S.players.indexOf(p); if (i >= 0) S.cur = i; save(); toast("Dreh zurückgenommen."); }
+  const takeBack = () => {
+    if (h) { removeEntries(x => sameEntry(x, h)); const i = S.players.indexOf(p); if (i >= 0) S.cur = i; save(); }
     else undo();
-    closeSheet();
-  });
+  };
+  // Abbrechen: Dreh komplett zurücknehmen, nichts Neues. Nochmal drehen: zurücknehmen und sofort neu drehen.
+  $("#rCancel").onclick = () => askCode($("#rCancel"), () => { takeBack(); toast("Dreh abgebrochen."); closeSheet(); });
+  $("#rUndo").onclick = () => askCode($("#rUndo"), () => { takeBack(); closeSheet(); setTimeout(spin, 250); });
 }
 
 // Einträge löschen: raus aus Verlauf, Statistik und Bewertung; ist der Drink für den Spieler dann
