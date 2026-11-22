@@ -125,6 +125,8 @@ h1 span { color: var(--coral); }
 .wahlrow select { width: 100%; appearance: none; border: 1.5px solid var(--line); background: var(--night); color: var(--foam); border-radius: 12px; padding: 11px 12px; font: 600 1rem var(--body); }
 .wahlrow { display: grid; gap: 4px; padding: 8px 0; }
 .ver { cursor: pointer; }
+.delh { padding: 6px 9px !important; font-size: .78rem !important; }
+.delh.sure { background: var(--coral); color: #fff; }
 .mode button.on { background: var(--sea); color: var(--ink); }
 .orow { display: flex; gap: 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .cnt { font: 800 2rem var(--display); color: var(--gold); min-width: 52px; font-variant-numeric: tabular-nums; }
@@ -414,7 +416,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "9"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "10"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 const NAMES = ["Christoph","Mark","Tim","Julian"];
 const DEFAULT = () => ({
@@ -516,6 +518,7 @@ function prepPool(p) {
   }
   return pool;
 }
+let lastSpinEntry = null;
 function spinFor(p, dur, rid) {
   return new Promise(resolve => {
     const pool = prepPool(p);
@@ -543,7 +546,7 @@ function spinFor(p, dur, rid) {
         p.seen.push(winner.id);
         const h = { pid: p.id, id: winner.id, t: Date.now() };
         if (rid) h.rid = rid;
-        S.history.unshift(h);
+        S.history.unshift(h); lastSpinEntry = h;
         save();
         resolve(winner);
       }
@@ -562,7 +565,7 @@ async function spin() {
   setBusy(true);
   const d = await spinFor(p, 4800);
   setBusy(false);
-  if (d) { confetti(); showResult(p, d); }
+  if (d) { confetti(); showResult(p, d, lastSpinEntry); }
 }
 async function spinRound() {
   setBusy(true);
@@ -604,8 +607,7 @@ function showOrder(rid) {
   $("#closeX").onclick = closeSheet;
   $("#oOk").onclick = closeSheet;
   $("#oRedo").onclick = () => {
-    S.history.filter(h => h.rid === rid).forEach(h => { const p = S.players.find(x => x.id === h.pid); if (p) { const k = p.seen.lastIndexOf(h.id); if (k >= 0) p.seen.splice(k, 1); } });
-    S.history = S.history.filter(h => h.rid !== rid); S.cur = 0; save(); toast("Runde zurückgenommen."); closeSheet();
+    removeEntries(h => h.rid === rid); S.cur = 0; save(); toast("Runde zurückgenommen."); closeSheet();
     if (rid[0] === "w") openWahl();
   };
 }
@@ -618,10 +620,11 @@ function refillSegsWith(winner, pool) {
 function land(p, d) {
 
   p.seen.push(d.id);
-  S.history.unshift({ pid: p.id, id: d.id, t: Date.now() });
+  const h = { pid: p.id, id: d.id, t: Date.now() };
+  S.history.unshift(h);
   save();
   confetti();
-  showResult(p, d);
+  showResult(p, d, h);
 }
 
 // ---------- UI ----------
@@ -760,7 +763,7 @@ function openSheet(which) {
     const items = hs.map(h => {
       const d = BY_ID[h.id];
       const t = new Date(h.t).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" });
-      return `<div class="row" style="flex-wrap:wrap"><div class="grow"><b>${esc(d.name)}</b>${tags(d)}<div class="muted">${esc(CATS[d.cat] || "")} · ${h.m ? "abgehakt " : ""}${t}</div></div>${starsHTML(h)}</div>`;
+      return `<div class="row" style="flex-wrap:wrap"><div class="grow"><b>${esc(d.name)}</b>${tags(d)}<div class="muted">${esc(CATS[d.cat] || "")} · ${h.m ? "abgehakt " : ""}${t}</div></div>${starsHTML(h)}${delBtn(h)}</div>`;
     }).join("");
     sheet("Meine Drinks", `${tabs}
       <div class="mysum"><div><b>${S.history.filter(h => h.pid === p.id && BY_ID[h.id]).length}</b><span>getrunken</span></div><div><b>${avg}</b><span>Ø Sterne</span></div><div><b>${S.history.filter(h => h.pid === p.id && BY_ID[h.id] && !h.r).length}</b><span>unbewertet</span></div></div>
@@ -775,14 +778,19 @@ function openSheet(which) {
     const items = S.history.slice(0, 200).map(h => {
       const d = BY_ID[h.id]; if (!d) return "";
       const t = new Date(h.t).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-      return `<div class="row" style="flex-wrap:wrap"><div class="grow"><b>${esc(pmap[h.pid] || "Entfernt")}</b> · ${esc(d.name)}${tags(d)} <span class="muted" style="font-variant-numeric:tabular-nums">${t}</span></div>${starsHTML(h)}</div>`;
+      return `<div class="row" style="flex-wrap:wrap"><div class="grow"><b>${esc(pmap[h.pid] || "Entfernt")}</b> · ${esc(d.name)}${tags(d)} <span class="muted" style="font-variant-numeric:tabular-nums">${t}</span></div>${starsHTML(h)}${delBtn(h)}</div>`;
     }).join("");
     const per = S.players.map(p => `<div class="row"><div class="grow"><b>${esc(p.name)}</b><div class="muted">${p.seen.map(id => BY_ID[id] ? esc(BY_ID[id].name) : "").filter(Boolean).join(", ") || "noch nichts"}</div></div><span class="muted">${p.seen.length}</span></div>`).join("");
-    sheet("Verlauf", `${S.history.length ? `<button class="btn small" type="button" id="undo">Letzten Dreh rückgängig</button>` : ""} ${S.history.some(h => h.rid) ? `<button class="btn small pri" type="button" id="lastOrder">Letzte Bestellung zeigen</button>` : ""}
+    const nOrph = S.history.filter(orphan).length;
+    sheet("Verlauf", `${nOrph ? `<div class="row"><div class="grow"><b>${nOrph} Einträge ohne Haken</b><div class="muted">Stehen noch in Verlauf und Statistik, sind in der Abhaken-Liste aber nicht angehakt (Altlasten von früher).</div></div><button class="btn small warn delh" type="button" id="cleanOld">Aufräumen</button></div>` : ""}${S.history.length ? `<button class="btn small" type="button" id="undo">Letzten Dreh rückgängig</button>` : ""} ${S.history.some(h => h.rid) ? `<button class="btn small pri" type="button" id="lastOrder">Letzte Bestellung zeigen</button>` : ""}
       <div class="cathead">Pro Spieler</div>${per || `<p class="muted">Noch keine Spieler.</p>`}
-      <div class="cathead">Zuletzt gedreht <span class="muted">(Sterne antippen zum Bewerten)</span></div>${items || `<p class="muted">Noch nichts gedreht.</p>`}`);
+      <div class="cathead">Zuletzt gedreht <span class="muted">(Sterne antippen zum Bewerten, falsch eingetragen? Löschen)</span></div>${items || `<p class="muted">Noch nichts gedreht.</p>`}`);
     const lr = S.history.find(h => h.rid); const ob = $("#lastOrder"); if (ob && lr) ob.onclick = () => showOrder(lr.rid);
     const u = $("#undo"); if (u) u.onclick = () => { undo(); openSheet("history"); };
+    const cl = $("#cleanOld"); if (cl) cl.onclick = () => {
+      if (!cl.classList.contains("sure")) { cl.classList.add("sure"); cl.textContent = "Wirklich aufräumen?"; return; }
+      const n = removeEntries(orphan); save(); renderTop(); toast(n + " Einträge entfernt."); openSheet("history");
+    };
   }
   if (which === "stats") {
     const H = S.history.slice().reverse().filter(h => BY_ID[h.id]);
@@ -871,10 +879,9 @@ function openSheet(which) {
         if (!p.seen.includes(id)) p.seen.push(id);
         if (!S.history.some(h => h.pid === p.id && h.id === id)) S.history.unshift({ pid: p.id, id, t: Date.now(), m: 1 }); // zählt in Statistik, bewertbar
       } else {
+        // Haken weg = nicht getrunken: alle Einträge dieses Drinks für den Spieler raus (Verlauf, Statistik, Bewertung)
+        removeEntries(h => h.pid === p.id && h.id === id);
         p.seen = p.seen.filter(x => x !== id);
-        // Haken weg = nicht getrunken: neuesten Eintrag dieses Drinks (gedreht oder abgehakt) aus Verlauf und Statistik nehmen
-        const k = S.history.findIndex(h => h.pid === p.id && h.id === id);
-        if (k >= 0) S.history.splice(k, 1);
       }
       save();
       const n = en.filter(d => p.seen.includes(d.id)).length;
@@ -926,7 +933,7 @@ function spiritCl(d) {
   return spiritOf(d) === "Likör & Bitter" ? 2 : 0;
 }
 
-function showResult(p, d) {
+function showResult(p, d, h) {
   overlay.innerHTML = `<div class="scrim"><div class="sheet result" role="dialog" aria-label="Ergebnis">
     <div class="who">${esc(p.name)} bekommt</div>
     <div class="drink">${esc(d.name)}</div>
@@ -938,15 +945,44 @@ function showResult(p, d) {
     </div>
   </div></div>`;
   $("#rNext").onclick = () => closeSheet();
-  $("#rUndo").onclick = () => { undo(); closeSheet(); };
+  $("#rUndo").onclick = () => {
+    if (h) { removeEntries(x => sameEntry(x, h)); const i = S.players.indexOf(p); if (i >= 0) S.cur = i; save(); toast("Dreh zurückgenommen."); }
+    else undo();
+    closeSheet();
+  };
 }
 
+// Einträge löschen: raus aus Verlauf, Statistik und Bewertung; ist der Drink für den Spieler dann
+// gar nicht mehr im Verlauf, kommt auch der Haken weg (Drink ist wieder im Rad). Gilt im Raum für alle.
+function removeEntries(pred) {
+  const gone = S.history.filter(pred); if (!gone.length) return 0;
+  S.history = S.history.filter(h => !pred(h));
+  gone.forEach(h => {
+    if (S.history.some(x => x.pid === h.pid && x.id === h.id)) return;
+    const p = S.players.find(x => x.id === h.pid); if (p) p.seen = p.seen.filter(id => id !== h.id);
+  });
+  return gone.length;
+}
+// Eintrag, dessen Drink beim Spieler nicht (mehr) abgehakt ist
+const orphan = h => { const p = S.players.find(x => x.id === h.pid); return !!p && BY_ID[h.id] && !p.seen.includes(h.id); };
+const sameEntry = (a, b) => a.pid === b.pid && a.t === b.t;
 function undo() {
-  const h = S.history.shift(); if (!h) return;
-  const i = S.players.findIndex(p => p.id === h.pid);
-  if (i >= 0) { const p = S.players[i]; const k = p.seen.lastIndexOf(h.id); if (k >= 0) p.seen.splice(k, 1); S.cur = i; }
+  const h = S.history[0]; if (!h) return;
+  removeEntries(x => sameEntry(x, h));
+  const i = S.players.findIndex(p => p.id === h.pid); if (i >= 0) S.cur = i;
   save(); toast("Dreh zurückgenommen.");
 }
+function delBtn(h) { return `<button class="btn small warn delh" type="button" data-delh="${h.t}:${esc(h.pid)}" aria-label="Eintrag löschen">Löschen</button>`; }
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-delh]"); if (!b) return;
+  if (!b.classList.contains("sure")) { b.classList.add("sure"); b.textContent = "Wirklich?"; setTimeout(() => { if (b.isConnected) { b.classList.remove("sure"); b.textContent = "Löschen"; } }, 3000); return; }
+  const [t, pid] = b.dataset.delh.split(":");
+  const n = removeEntries(h => String(h.t) === t && h.pid === pid);
+  save(); renderTop(); if (n) toast("Gelöscht.");
+  const which = overlay.querySelector("#mySort") ? "mine" : "history";
+  const sh = overlay.querySelector(".sheet"); const y = sh ? sh.scrollTop : 0;
+  openSheet(which); const sh2 = overlay.querySelector(".sheet"); if (sh2) sh2.scrollTop = y;
+});
 
 let toastT;
 function toast(msg) {

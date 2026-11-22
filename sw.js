@@ -1,7 +1,7 @@
 // Drink-Rad Offline-Cache. Bei Änderungen VERSION hochzählen (gleich wie APP_VERSION in index.html).
 // Die App selbst (index.html) kommt immer frisch aus dem Netz, wenn es da ist, sonst aus dem Cache.
 // Bilder, Manifest und Schriften kommen zuerst aus dem Cache.
-const VERSION = "drinkrad-v9";
+const VERSION = "drinkrad-v10";
 const FILES = ["./index.html", "./manifest.json", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", e => {
   // cache: "reload" umgeht den Browser-Cache, sonst landet evtl. eine alte index.html im neuen Cache
