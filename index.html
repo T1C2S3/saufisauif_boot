@@ -129,6 +129,8 @@ h1 span { color: var(--coral); }
 .fav.on { color: var(--coral); }
 .lockbox { display: grid; gap: 8px; background: var(--night); border: 1.5px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 8px; }
 .switch input:disabled + span, [data-ex]:disabled { opacity: .45; }
+#demoBar { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 6px); z-index: 80; appearance: none; border: 0; border-radius: 99px; padding: 7px 14px; background: #c0182c; color: #fff; font: 800 .78rem var(--body); letter-spacing: .04em; box-shadow: 0 4px 14px rgba(0,0,0,.4); white-space: nowrap; }
+body.demo .app { outline: 3px dashed #c0182c; outline-offset: 4px; border-radius: 12px; }
 #dq .dqwrap { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(5,10,25,.6); padding: 24px; animation: dqfade .2s; }
 #dq .dqcard { background: #fff; color: #c0182c; border: 6px solid #c0182c; border-radius: 18px; padding: 20px 22px; text-align: center; max-width: 340px; transform: rotate(-6deg); box-shadow: 0 12px 40px rgba(0,0,0,.5); animation: dqstamp .35s cubic-bezier(.2,1.6,.4,1); }
 #dq .dqbig { font: 800 2.1rem var(--display); letter-spacing: .04em; line-height: 1; }
@@ -257,6 +259,7 @@ input[type=text], input[type=password] {
 <div id="overlay"></div>
 <canvas class="confetti" id="confetti" hidden></canvas>
 <div id="dq"></div>
+<button id="demoBar" type="button" hidden>DEMO · nichts wird gespeichert · tippen zum Beenden</button>
 
 <script>
 // ---------- Getränkekarte (abgeschrieben von den Fotos) ----------
@@ -428,8 +431,9 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "13"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "14"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
+let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
 const DEFAULT = () => ({
   players: NAMES.map((n, i) => ({ id: "p" + i + Date.now().toString(36), name: n, seen: [], fav: [] })),
@@ -451,7 +455,7 @@ if (S.players.length && S.players.every(p => /^Spieler \d+$/.test(p.name))) {
   S.players = DEFAULT().players; S.history = []; S.cur = 0;
 }
 if (S.v !== 2) { S.inclOnly = true; S.allowAf = false; S.v = 2; }
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} syncSoon(); };
+const save = () => { if (DEMO) return; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} syncSoon(); };
 
 const enabled = () => DRINKS.filter(d =>
   S.cats[d.cat] && (!S.inclOnly || !d.price) && (S.allowAf || !d.af) && !S.excluded.includes(d.id));
@@ -726,7 +730,7 @@ function bindLogin(back) {
   const f = $("#loginForm"); if (!f) return;
   f.onsubmit = e => {
     e.preventDefault();
-    if ($("#lgUser").value.trim().toLowerCase() === "christoph" && $("#lgPw").value === "0000") { filterAdmin = true; toast("Angemeldet, Filter frei."); openSheet(back); }
+    if ($("#lgUser").value.trim().toLowerCase() === "christoph" && $("#lgPw").value === "0000") { filterAdmin = true; toast("Angemeldet."); back === "extras" ? openUnlock() : openSheet(back); }
     else { toast("Benutzer oder Passwort falsch."); $("#lgPw").value = ""; }
   };
 }
@@ -1154,11 +1158,11 @@ async function fb(path, opt = {}) {
 }
 function setSyncState(s) { syncState = s; renderRoomPill(); }
 function syncSoon(ms = 900) {
-  if (!SY.code || !dbUrl()) return;
+  if (DEMO || !SY.code || !dbUrl()) return;
   clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, ms);
 }
 async function syncNow() {
-  if (!SY.code || !dbUrl()) return;
+  if (DEMO || !SY.code || !dbUrl()) return;
   if (syncBusy || spinning) { syncAgain = true; if (spinning) syncSoon(1500); return; }
   if (navigator.onLine === false) { setSyncState("offline"); return; }
   syncBusy = true; setSyncState("wait");
@@ -1209,6 +1213,7 @@ function fixManual() {
   return changed;
 }
 function applyRemote(o) {
+  if (DEMO) { try { const r = JSON.parse(REAL); fromShared(o, r); REAL = JSON.stringify(r); localStorage.setItem(KEY, REAL); } catch (e) {} return; }
   fromShared(o, S);
   if (fixManual()) syncSoon();
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
@@ -1217,7 +1222,7 @@ function applyRemote(o) {
 async function pollRev() {
   clearTimeout(pollTimer);
   if (!SY.code || !dbUrl()) return;
-  if (document.visibilityState === "visible" && navigator.onLine !== false && !syncBusy) {
+  if (!DEMO && document.visibilityState === "visible" && navigator.onLine !== false && !syncBusy) {
     try {
       const r = await fb("/rev");
       if (r.ok) { const rev = await r.json(); if (rev && rev !== SY.rev) { SY.rev = rev; await syncNow(); } else if (syncState !== "wait") setSyncState("ok"); }
@@ -1358,22 +1363,43 @@ function openWahl() {
     disq(picks.map(x => ({ p: x.p, d: BY_ID[x.id] })));
   };
 }
+function startDemo() {
+  REAL = JSON.stringify(S); DEMO = true;
+  document.body.classList.add("demo"); renderDemo(); closeSheet(); toast("Demo-Modus an: nichts wird gespeichert.");
+}
+function endDemo() {
+  DEMO = false; try { S = JSON.parse(REAL); } catch (e) {} REAL = null;
+  document.body.classList.remove("demo"); renderDemo(); closeSheet(); toast("Demo beendet, echter Spielstand ist zurück.");
+  syncSoon(200);
+}
+function renderDemo() {
+  const b = document.getElementById("demoBar");
+  b.hidden = !DEMO;
+}
 function openUnlock() {
   if (spinning) return;
-  if (S.wahlOn) {
-    sheet("Wahlrunde", `<p class="muted">Die Wahlrunde ist auf diesem Handy freigeschaltet.</p><button class="btn warn" type="button" id="wahlOff">Wieder ausblenden</button>`);
-    $("#wahlOff").onclick = () => { S.wahlOn = false; if (S.mode === "wahl") S.mode = "single"; save(); toast("Wahlrunde ausgeblendet."); closeSheet(); };
-    return;
-  }
-  sheet("Code eingeben", `<form class="row" id="unlockForm"><div class="grow"><input type="text" id="unlockIn" inputmode="numeric" placeholder="Code" autocomplete="off" maxlength="8"></div><button class="btn pri" type="submit">OK</button></form>`);
-  setTimeout(() => { const x = $("#unlockIn"); x && x.focus(); }, 50);
-  $("#unlockForm").onsubmit = e => {
+  const wahl = S.wahlOn
+    ? `<div class="row"><div class="grow"><b>Wahlrunde</b><div class="muted">Auf diesem Handy freigeschaltet.</div></div><button class="btn small warn" type="button" id="wahlOff">Ausblenden</button></div>`
+    : `<form class="row" id="unlockForm"><div class="grow"><input type="text" id="unlockIn" inputmode="numeric" placeholder="Code für Wahlrunde" autocomplete="off" maxlength="8"></div><button class="btn pri" type="submit">OK</button></form>`;
+  const demo = DEMO
+    ? `<p class="muted">Der Demo-Modus läuft. Alles, was ihr jetzt dreht, abhakt oder bewertet, wird beim Beenden verworfen.</p><button class="btn pri" type="button" id="demoEnd">Demo beenden</button>`
+    : filterAdmin
+      ? `<p class="muted">Zum Vorzeigen: Die App funktioniert ganz normal, aber nichts zählt. Kein Verlauf, keine Statistik, keine Haken, keine Bewertungen, kein Raum-Abgleich. Beim Beenden ist alles wie vorher.</p><button class="btn pri" type="button" id="demoStart">Demo starten</button>`
+      : loginBox();
+  sheet("Extras", `<div class="cathead" style="margin-top:0">Wahlrunde</div>${wahl}<div class="cathead">Demo-Modus</div>${demo}`);
+  bindLogin("extras");
+  const ds = $("#demoStart"); if (ds) ds.onclick = startDemo;
+  const de = $("#demoEnd"); if (de) de.onclick = () => { if (filterAdmin) endDemo(); else { toast("Erst als Christoph anmelden."); } };
+  if (DEMO && !filterAdmin) $("#demoEnd").insertAdjacentHTML("beforebegin", loginBox()), bindLogin("extras");
+  const wo = $("#wahlOff"); if (wo) wo.onclick = () => { S.wahlOn = false; if (S.mode === "wahl") S.mode = "single"; save(); toast("Wahlrunde ausgeblendet."); openUnlock(); render(); };
+  const uf = $("#unlockForm"); if (uf) uf.onsubmit = e => {
     e.preventDefault();
     if ($("#unlockIn").value.trim() === "0000") { S.wahlOn = true; S.mode = "wahl"; save(); toast("Wahlrunde freigeschaltet!"); closeSheet(); }
     else { toast("Falscher Code."); $("#unlockIn").value = ""; }
   };
 }
 document.getElementById("ver").addEventListener("click", openUnlock);
+document.getElementById("demoBar").addEventListener("click", openUnlock);
 // ---------- Start ----------
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · Stand 22.11.2026";
 if (fixManual()) save();
