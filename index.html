@@ -410,7 +410,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "5"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "6"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 const NAMES = ["Christoph","Mark","Tim","Julian"];
 const DEFAULT = () => ({
@@ -700,7 +700,7 @@ function openSheet(which) {
         <div class="grow"><input type="text" id="newName" placeholder="Neuer Name" autocomplete="off" enterkeyhint="done"></div>
         <button class="btn pri" type="submit">Hinzufügen</button>
       </form>
-      <p class="muted">Tipp: Antippen eines Namens oben wählt, wer dreht. Nach „Prost!“ ist automatisch der Nächste dran.</p>
+      <p class="muted">Tipp: Antippen eines Namens oben wählt, wer dreht. Der gewählte Spieler bleibt, bis ihr oben jemand anderen antippt.</p>
       <div class="row"><div class="grow"><b>Alle Drinks zurücksetzen</b><div class="muted">Spieler bleiben, alle getrunkenen Drinks und der Verlauf werden gelöscht.</div></div>
         <button class="btn small warn" type="button" id="resetAll">Zurücksetzen</button></div>
       <div id="confirmBox"></div>`);
@@ -917,7 +917,6 @@ function spiritCl(d) {
 }
 
 function showResult(p, d) {
-  const next = S.players.length ? S.players[(S.cur + 1) % S.players.length] : null;
   overlay.innerHTML = `<div class="scrim"><div class="sheet result" role="dialog" aria-label="Ergebnis">
     <div class="who">${esc(p.name)} bekommt</div>
     <div class="drink">${esc(d.name)}</div>
@@ -925,10 +924,10 @@ function showResult(p, d) {
     <div class="meta"><span class="tag cat">${esc(CATS[d.cat])}</span>${d.price ? `<span class="tag price">${esc(d.price)}</span>` : `<span class="tag done">inklusive</span>`}${d.af ? `<span class="tag af">alkoholfrei</span>` : ""}</div>
     <div class="actions">
       <button class="btn warn" type="button" id="rUndo">Nochmal drehen</button>
-      <button class="btn pri" type="button" id="rNext">Prost! ${next && S.players.length > 1 ? "Weiter: " + esc(next.name) : ""}</button>
+      <button class="btn pri" type="button" id="rNext">Prost!</button>
     </div>
   </div></div>`;
-  $("#rNext").onclick = () => { if (S.players.length) S.cur = (S.cur + 1) % S.players.length; save(); closeSheet(); };
+  $("#rNext").onclick = () => closeSheet();
   $("#rUndo").onclick = () => { undo(); closeSheet(); };
 }
 

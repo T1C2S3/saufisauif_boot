@@ -1,5 +1,5 @@
 // Drink-Rad Offline-Cache. Bei Änderungen VERSION hochzählen.
-const VERSION = "drinkrad-v5";
+const VERSION = "drinkrad-v6";
 const FILES = ["./", "./index.html", "./manifest.json", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
