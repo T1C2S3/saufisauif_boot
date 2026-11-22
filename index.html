@@ -408,6 +408,45 @@ const RAW = [
   ["Martini Bianco","Wermut · 5 cl",null,"pur",0],
   ["Martini Rosso","Wermut · 5 cl",null,"pur",0],
   ["Noilly Prat","Wermut · 5 cl","4,40 €","pur",0],
+  // Spirituosen pur, zweite Karten-Seite (4 cl): Rum bis Bitter
+  ["Saltwater's weißer Rum", "Rum · 4 cl", null, "pur", 0],
+  ["Saltwater's brauner Rum", "Rum · 4 cl", null, "pur", 0],
+  ["Myers's Rum", "Rum · 4 cl", null, "pur", 0],
+  ["Bacardi Carta Blanca", "Rum · 4 cl", null, "pur", 0],
+  ["Havana Club Añejo 3", "Rum · 4 cl", null, "pur", 0],
+  ["Havana Club Añejo 7", "Rum · 4 cl", "5,60 €", "pur", 0],
+  ["El Dorado Rum 15 Años", "Rum · 4 cl", "12,00 €", "pur", 0],
+  ["Saltwater's Cachaça", "Cachaça · 4 cl", null, "pur", 0],
+  ["Saltwater's Gin", "Gin · 4 cl", null, "pur", 0],
+  ["Gordon's London Dry Gin", "Gin · 4 cl", null, "pur", 0],
+  ["Bombay Sapphire", "Gin · 4 cl", null, "pur", 0],
+  ["Tanqueray", "Gin · 4 cl", null, "pur", 0],
+  ["GIN SUL", "Gin · 4 cl", "9,20 €", "pur", 0],
+  ["Monkey 47", "Gin · 4 cl", "9,20 €", "pur", 0],
+  ["Monkey 47 Sloe Gin", "Gin · 4 cl", "10,10 €", "pur", 0],
+  ["Saltwater's Vodka", "Vodka · 4 cl", null, "pur", 0],
+  ["Absolut Blue", "Vodka · 4 cl", null, "pur", 0],
+  ["Jose Cuervo Especial Silver", "Tequila · 4 cl", null, "pur", 0],
+  ["Jose Cuervo Especial Gold", "Tequila · 4 cl", null, "pur", 0],
+  ["Vecchia Romagna Etichetta Nera", "Brandy · 4 cl", null, "pur", 0],
+  ["Metaxa *****", "Brandy · 4 cl", null, "pur", 0],
+  ["Cardenal Mendoza Gran Reserva", "Brandy · 4 cl", null, "pur", 0],
+  ["Janneau V.S.O.P.", "Armagnac · 4 cl", null, "pur", 0],
+  ["Larsen Cognac V.S.", "Cognac · 4 cl", null, "pur", 0],
+  ["Frapin VIP XO Grande Champagne", "Cognac · 4 cl", "12,00 €", "pur", 0],
+  ["Bache-Gabrielsen Thomas XO Prestige, Réserve Edition", "Cognac · 4 cl", "10,00 €", "pur", 0],
+  ["Cellini Cru", "Grappa · 4 cl", null, "pur", 0],
+  ["Il Merlot di Nonino", "Grappa · 4 cl", "6,30 €", "pur", 0],
+  ["Il Moscato di Nonino", "Grappa · 4 cl", "6,30 €", "pur", 0],
+  ["Calvados Père Magloire V.S.O.P.", "Obstbrand · 4 cl", null, "pur", 0],
+  ["Kostenzer Alter Apfel (40 %)", "Obstbrand · 4 cl", "6,40 €", "pur", 0],
+  ["Zieser Marille", "Obstbrand · 4 cl", "18,00 €", "pur", 0],
+  ["Zieser Himbeere", "Obstbrand · 4 cl", "18,00 €", "pur", 0],
+  ["Zieser Birne", "Obstbrand · 4 cl", "18,00 €", "pur", 0],
+  ["Saltwater's Aperitivo Bitterlikör", "Bitter · 4 cl", null, "pur", 0],
+  ["Aperol", "Bitter · 4 cl", null, "pur", 0],
+  ["Campari", "Bitter · 4 cl", null, "pur", 0],
+  ["Fernet-Branca", "Bitter · 4 cl", null, "pur", 0],
   // Bier
   ["Bitburger Premium Pils vom Fass","Pils vom Fass · 0,3 l",null,"bier",0],
   ["Bitburger Radler","Radler · 0,33 l",null,"bier",0],
@@ -440,7 +479,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "19"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "20"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
