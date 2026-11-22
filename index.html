@@ -930,7 +930,7 @@ function confetti() {
 // Jedes Handy spielt lokal weiter, auch offline. Sobald Netz da ist, wird per 3-Wege-Abgleich
 // (letzter gemeinsamer Stand + eigener Stand + Stand im Raum) zusammengeführt: Hinzugefügtes von
 // beiden Seiten bleibt, Gelöschtes von einer Seite fliegt raus, bei echten Konflikten gewinnt die eigene Änderung.
-const DB_URL = ""; // Firebase Realtime Database URL, z. B. https://xyz-default-rtdb.europe-west1.firebasedatabase.app
+const DB_URL = "https://drinkrad-default-rtdb.europe-west1.firebasedatabase.app"; // Firebase Realtime Database URL, z. B. https://xyz-default-rtdb.europe-west1.firebasedatabase.app
 const RKEY = KEY + "-room";
 const SY = (() => { try { return JSON.parse(localStorage.getItem(RKEY)) || {}; } catch (e) { return {}; } })();
 // SY: { code, db, base, rev, last }
