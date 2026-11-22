@@ -410,7 +410,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "7"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "8"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 const NAMES = ["Christoph","Mark","Tim","Julian"];
 const DEFAULT = () => ({
@@ -855,7 +855,7 @@ function openSheet(which) {
         return `<label class="drinkline"><input type="checkbox" data-ck="${esc(d.id)}" ${on ? "checked" : ""} aria-label="${esc(d.name)} getrunken"><div class="grow"><span class="name">${esc(d.name)}</span>${tags(d)}<div class="muted">${esc(d.ing)}</div></div></label>`;
       }).join("");
     }).join("");
-    sheet("Abhaken", `${tabs}<p class="muted"><b style="color:var(--gold);font-size:1.1rem">${done} / ${en.length}</b> Drinks im Rad schon getrunken. Abgehakte Drinks kommen für ${esc(p.name)} nicht mehr aufs Rad. Haken weg = Drink ist wieder drin.</p>${groups}`);
+    sheet("Abhaken", `${tabs}<p class="muted"><b style="color:var(--gold);font-size:1.1rem">${done} / ${en.length}</b> Drinks im Rad schon getrunken. Abgehakte Drinks kommen für ${esc(p.name)} nicht mehr aufs Rad. Haken weg = Drink ist wieder drin und fliegt aus Verlauf und Statistik.</p>${groups}`);
     overlay.querySelectorAll("[data-cp]").forEach(b => b.onclick = () => { S.checkP = +b.dataset.cp; save(); const y = overlay.querySelector(".sheet").scrollTop; openSheet("check"); });
     overlay.querySelectorAll("[data-ck]").forEach(cb => cb.addEventListener("change", () => {
       const id = cb.dataset.ck;
@@ -864,7 +864,9 @@ function openSheet(which) {
         if (!S.history.some(h => h.pid === p.id && h.id === id)) S.history.unshift({ pid: p.id, id, t: Date.now(), m: 1 }); // zählt in Statistik, bewertbar
       } else {
         p.seen = p.seen.filter(x => x !== id);
-        S.history = S.history.filter(h => !(h.pid === p.id && h.id === id && h.m)); // nur manuelle Haken zurücknehmen, gedrehte bleiben
+        // Haken weg = nicht getrunken: neuesten Eintrag dieses Drinks (gedreht oder abgehakt) aus Verlauf und Statistik nehmen
+        const k = S.history.findIndex(h => h.pid === p.id && h.id === id);
+        if (k >= 0) S.history.splice(k, 1);
       }
       save();
       const n = en.filter(d => p.seen.includes(d.id)).length;
