@@ -191,6 +191,10 @@ input[type=text], input[type=password] {
 .drinkline { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .drinkline input { width: 22px; height: 22px; margin-top: 2px; accent-color: var(--sea); flex: 0 0 auto; }
 .drinkline .grow { flex: 1; min-width: 0; }
+.cnt1 { flex: 0 0 auto; font: 800 .95rem var(--display); color: var(--gold); margin-top: 2px; }
+.ctr { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+.ctr .btn { padding: 4px 11px !important; font-size: 1.05rem !important; }
+.ctr b { min-width: 2.2em; text-align: center; color: var(--gold); }
 .drinkline.off .name { text-decoration: line-through; color: var(--mist); }
 .name { font-weight: 700; }
 .tag { display: inline-block; font-size: .72rem; font-weight: 700; padding: 2px 7px; border-radius: 99px; margin-left: 6px; vertical-align: 1px; }
@@ -431,7 +435,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "16"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "17"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -708,7 +712,7 @@ document.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click"
 document.addEventListener("click", e => { const b = e.target.closest(".chip.add"); if (b) openSheet("players"); });
 
 const overlay = $("#overlay");
-function closeSheet() { overlay.innerHTML = ""; render(); }
+function closeSheet() { overlay.innerHTML = ""; countEdit = false; render(); }
 function sheet(title, body) {
   overlay.innerHTML = `<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-label="${esc(title)}"><h2>${esc(title)}<button class="x" type="button" aria-label="Schließen" id="closeX">✕</button></h2>${body}</div></div>`;
   $("#closeX").onclick = closeSheet;
@@ -719,7 +723,7 @@ function tags(d) {
 }
 
 // Filter-Schutz (nur Party-Schutz, kein echter Passwortschutz). Freigabe gilt, bis die App geschlossen wird.
-let filterAdmin = false;
+let filterAdmin = false, countEdit = false;
 function loginBox(back) {
   return `<form class="lockbox" id="loginForm"><b>🔒 Nur Christoph darf die Filter ändern</b>
     <input type="text" id="lgUser" placeholder="Benutzer" autocomplete="off" autocapitalize="off">
@@ -932,12 +936,24 @@ function openSheet(which) {
       const n = ds.filter(d => p.seen.includes(d.id)).length;
       return `<div class="cathead">${esc(l)} <span class="muted">${n}/${ds.length}</span></div>` + ds.map(d => {
         const on = p.seen.includes(d.id);
-        return `<label class="drinkline"><input type="checkbox" data-ck="${esc(d.id)}" ${on ? "checked" : ""} aria-label="${esc(d.name)} getrunken"><div class="grow"><span class="name">${esc(d.name)}</span>${tags(d)}<div class="muted">${esc(d.ing)}</div></div></label>`;
+        const c = S.history.filter(h => h.pid === p.id && h.id === d.id).length;
+        const ctr = countEdit
+          ? `<span class="ctr"><button type="button" class="btn small" data-cm="${esc(d.id)}" ${c ? "" : "disabled"} aria-label="einen weniger">−</button><b>${c}×</b><button type="button" class="btn small" data-cp2="${esc(d.id)}" aria-label="einen mehr">+</button></span>`
+          : (c ? `<span class="cnt1">${c}×</span>` : "");
+        return `<label class="drinkline"><input type="checkbox" data-ck="${esc(d.id)}" ${on ? "checked" : ""} aria-label="${esc(d.name)} getrunken"><div class="grow"><span class="name">${esc(d.name)}</span>${tags(d)}<div class="muted">${esc(d.ing)}</div></div>${ctr}</label>`;
       }).join("");
     }).join("");
-    sheet("Abhaken", `${tabs}<p class="muted"><b style="color:var(--gold);font-size:1.1rem">${done} / ${en.length}</b> Drinks schon getrunken. <a href="#" id="ckFilter" style="color:var(--sea)">Filter fürs Abhaken</a>. Abgehakte Drinks kommen für ${esc(p.name)} nicht mehr aufs Rad. Haken weg (mit Code) = Drink ist wieder drin und fliegt aus Verlauf und Statistik.</p>${groups}`);
+    sheet("Abhaken", `${tabs}<p class="muted"><b style="color:var(--gold);font-size:1.1rem">${done} / ${en.length}</b> Drinks schon getrunken. <a href="#" id="ckFilter" style="color:var(--sea)">Filter fürs Abhaken</a>. Die Zahl rechts zeigt, wie oft getrunken.  Abgehakte Drinks kommen für ${esc(p.name)} nicht mehr aufs Rad. Haken weg (mit Code) = Drink ist wieder drin und fliegt aus Verlauf und Statistik.</p><div class="row" id="ctrRow"><div class="grow muted">${countEdit ? "Zähler-Bearbeitung an: + und − ändern Verlauf und Statistik." : "Zähler ändern (mit Code)"}</div><button class="btn small ${countEdit ? "" : "pri"}" type="button" id="ctrBtn">${countEdit ? "Fertig" : "Bearbeiten"}</button></div>${groups}`);
     $("#ckFilter").onclick = e => { e.preventDefault(); S.fTab = "check"; openSheet("filter"); };
     overlay.querySelectorAll("[data-cp]").forEach(b => b.onclick = () => { S.checkP = +b.dataset.cp; save(); const y = overlay.querySelector(".sheet").scrollTop; openSheet("check"); });
+    const reopenCk = () => { const y = overlay.querySelector(".sheet").scrollTop; openSheet("check"); const sh = overlay.querySelector(".sheet"); if (sh) sh.scrollTop = y; };
+    $("#ctrBtn").onclick = () => { if (countEdit) { countEdit = false; reopenCk(); } else askCode($("#ctrRow"), () => { countEdit = true; reopenCk(); }); };
+    overlay.querySelectorAll("[data-cp2]").forEach(b => b.onclick = e => { e.preventDefault(); const id = b.dataset.cp2;
+      if (!p.seen.includes(id)) p.seen.push(id);
+      S.history.unshift({ pid: p.id, id, t: Date.now(), m: 1 }); save(); renderTop(); reopenCk(); });
+    overlay.querySelectorAll("[data-cm]").forEach(b => b.onclick = e => { e.preventDefault(); const id = b.dataset.cm;
+      const h = S.history.find(x => x.pid === p.id && x.id === id); if (!h) return;
+      removeEntries(x => sameEntry(x, h)); save(); renderTop(); reopenCk(); });
     const updCount = () => { const n = en.filter(d => p.seen.includes(d.id)).length; overlay.querySelector(".sheet p.muted b").textContent = `${n} / ${en.length}`; renderTop(); };
     overlay.querySelectorAll("[data-ck]").forEach(cb => cb.addEventListener("change", () => {
       const id = cb.dataset.ck;
@@ -952,11 +968,11 @@ function openSheet(which) {
           removeEntries(h => h.pid === p.id && h.id === id);
           p.seen = p.seen.filter(x => x !== id);
           cb.checked = false;
-          save(); updCount();
+          save(); updCount(); reopenCk();
         });
         return;
       }
-      save(); updCount();
+      save(); updCount(); reopenCk();
     }));
   }
   if (which === "menu") {
@@ -1107,7 +1123,7 @@ function toShared(st) {
   });
   st.history.forEach(h => {
     const k = h.pid + "_" + h.t;
-    o.hist[k] = Object.assign({ pid: h.pid, id: h.id, t: h.t }, h.rid ? { rid: h.rid } : {}, h.m ? { m: 1 } : {});
+    o.hist[k] = Object.assign({ pid: h.pid, id: h.id, t: h.t }, h.rid ? { rid: h.rid } : {}, h.m ? { m: h.m } : {});
     if (h.r) o.rate[k] = h.r;
   });
   for (const [k, v] of Object.entries(st.cats)) o.set.cats[k] = !!v;
@@ -1123,7 +1139,7 @@ function fromShared(o, st) {
   st.players = pl.map(([id, p]) => ({ id, name: p.name || "?", seen: Object.keys((o.seen || {})[id] || {}).map(unfk), fav: Object.keys((o.fav || {})[id] || {}).map(unfk) }));
   st.cur = Math.max(0, st.players.findIndex(p => p.id === curId));
   const rate = o.rate || {};
-  st.history = Object.entries(o.hist || {}).map(([k, h]) => Object.assign({ pid: h.pid, id: h.id, t: h.t }, h.rid ? { rid: h.rid } : {}, h.m ? { m: 1 } : {}, rate[k] ? { r: rate[k] } : {}))
+  st.history = Object.entries(o.hist || {}).map(([k, h]) => Object.assign({ pid: h.pid, id: h.id, t: h.t }, h.rid ? { rid: h.rid } : {}, h.m ? { m: h.m } : {}, rate[k] ? { r: rate[k] } : {}))
     .sort((a, b) => b.t - a.t);
   const set = o.set || {};
   if ("inclOnly" in set) st.inclOnly = !!set.inclOnly;
@@ -1214,13 +1230,13 @@ function fixManual() {
   const keep = new Map();
   for (const h of S.history.slice().sort((a, b) => a.t - b.t || (a.m ? 1 : 0) - (b.m ? 1 : 0))) {
     const k = h.pid + "|" + h.id;
-    if (h.m && keep.has(k)) { const o = keep.get(k); if (!o.r && h.r) o.r = h.r; h._drop = 1; changed = true; }
+    if (h.m === 2 && keep.has(k)) { const o = keep.get(k); if (!o.r && h.r) o.r = h.r; h._drop = 1; changed = true; }
     else if (!keep.has(k)) keep.set(k, h);
   }
   if (changed) S.history = S.history.filter(h => !h._drop);
   const now = Date.now();
   S.players.forEach((p, i) => p.seen.forEach((id, j) => {
-    if (BY_ID[id] && !S.history.some(h => h.pid === p.id && h.id === id)) { S.history.push({ pid: p.id, id, t: now - 1000 * (p.seen.length - j), m: 1 }); changed = true; }
+    if (BY_ID[id] && !S.history.some(h => h.pid === p.id && h.id === id)) { S.history.push({ pid: p.id, id, t: now - 1000 * (p.seen.length - j), m: 2 }); changed = true; }
   }));
   if (changed) S.history.sort((a, b) => b.t - a.t);
   return changed;
