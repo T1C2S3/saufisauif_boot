@@ -138,6 +138,9 @@ body.demo .app { outline: 3px dashed #c0182c; outline-offset: 4px; border-radius
 #dq .dqsmall { color: #6b7894; font-size: .8rem; margin-top: 10px; }
 @keyframes dqstamp { from { transform: rotate(-6deg) scale(2.4); opacity: 0; } to { transform: rotate(-6deg) scale(1); opacity: 1; } }
 @keyframes dqfade { from { opacity: 0; } }
+.qrbox { background: #fff; border-radius: 14px; padding: 8px; margin: 12px auto 4px; width: min(100%, 340px); aspect-ratio: 1; }
+.qrbox svg { width: 100%; height: 100%; display: block; }
+.qrvid { width: 100%; border-radius: 14px; margin-top: 12px; background: #000; aspect-ratio: 3 / 4; object-fit: cover; }
 .delh { padding: 6px 9px !important; font-size: .78rem !important; }
 .delh.sure { background: var(--coral); color: #fff; }
 .mode button.on { background: var(--sea); color: var(--ink); }
@@ -435,7 +438,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "17"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "18"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -712,7 +715,7 @@ document.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click"
 document.addEventListener("click", e => { const b = e.target.closest(".chip.add"); if (b) openSheet("players"); });
 
 const overlay = $("#overlay");
-function closeSheet() { overlay.innerHTML = ""; countEdit = false; render(); }
+function closeSheet() { stopQr(); overlay.innerHTML = ""; countEdit = false; render(); }
 function sheet(title, body) {
   overlay.innerHTML = `<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-label="${esc(title)}"><h2>${esc(title)}<button class="x" type="button" aria-label="Schließen" id="closeX">✕</button></h2>${body}</div></div>`;
   $("#closeX").onclick = closeSheet;
@@ -1317,6 +1320,7 @@ function openRoomSheet() {
       <div class="row" style="justify-content:center;gap:8px"><button class="btn pri" type="button" id="shareRoom">Link teilen</button><button class="btn" type="button" id="syncRoom">Jetzt abgleichen</button></div>
       <p class="muted" id="roomState">${esc(roomStateText())}</p>
       <p class="muted">Alle Handys im Raum teilen Spieler, Verlauf, Bewertungen, Abhaken-Listen und Filter. Wer gerade dreht, wählt jedes Handy selbst.</p>
+      <div class="row"><div class="grow"><b>Ohne Internet abgleichen</b><div class="muted">Handys per QR-Code direkt abgleichen, z. B. auf See.</div></div><button class="btn small pri" type="button" id="qrOpen">QR-Abgleich</button></div>
       <div class="row"><div class="grow"><b>Raum verlassen</b><div class="muted">Dein Stand bleibt auf diesem Handy, wird aber nicht mehr geteilt.</div></div><button class="btn small warn" type="button" id="leaveRoom">Verlassen</button></div>`);
     $("#shareRoom").onclick = async () => {
       const url = roomLink();
@@ -1324,6 +1328,7 @@ function openRoomSheet() {
       try { await navigator.clipboard.writeText(url); toast("Link kopiert."); } catch (e) { toast(url); }
     };
     $("#syncRoom").onclick = () => syncNow();
+    $("#qrOpen").onclick = openQrSheet;
     $("#leaveRoom").onclick = () => { leaveRoom(); toast("Raum verlassen."); closeSheet(); };
     return;
   }
@@ -1333,7 +1338,11 @@ function openRoomSheet() {
     <button class="btn pri" type="button" id="mkRoom">Raum erstellen</button>
     <div class="cathead">Einem Raum beitreten</div>
     <p class="muted">Der Stand auf diesem Handy wird durch den Stand im Raum ersetzt. Tipp: Erst die App zum Home-Bildschirm hinzufügen und dort beitreten, Safari und Home-Bildschirm merken sich getrennt.</p>
-    <form class="row" id="joinForm"><div class="grow"><input type="text" id="codeIn" placeholder="Code, z. B. FLOW42" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12"></div><button class="btn pri" type="submit">Beitreten</button></form>`);
+    <form class="row" id="joinForm"><div class="grow"><input type="text" id="codeIn" placeholder="Code, z. B. FLOW42" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12"></div><button class="btn pri" type="submit">Beitreten</button></form>
+    <div class="cathead">Ohne Internet</div>
+    <p class="muted">Zwei Handys direkt per QR-Code abgleichen, ganz ohne Netz.</p>
+    <button class="btn" type="button" id="qrOpen">QR-Abgleich</button>`);
+  $("#qrOpen").onclick = openQrSheet;
   $("#mkRoom").onclick = async () => {
     if (navigator.onLine === false) { toast("Zum Erstellen braucht es einmal Netz."); return; }
     await createRoom();
@@ -1429,6 +1438,92 @@ function openUnlock() {
 }
 document.getElementById("ver").addEventListener("click", openUnlock);
 document.getElementById("demoBar").addEventListener("click", openUnlock);
+// ---------- Abgleich ohne Internet per QR-Code ----------
+// Handy A zeigt seinen Stand als laufende Folge von QR-Codes, Handy B scannt sie mit der Kamera und führt
+// mit derselben Logik wie beim Raum zusammen. Danach umgekehrt, dann haben beide alles.
+function loadScript(src) {
+  return new Promise((ok, fail) => { if (document.querySelector(`script[data-src="${src}"]`)) return ok(); const s = document.createElement("script"); s.src = src; s.dataset.src = src; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
+}
+const b64 = { enc: u8 => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }, dec: s => Uint8Array.from(atob(s), c => c.charCodeAt(0)) };
+async function packState() {
+  const json = new TextEncoder().encode(JSON.stringify(toShared(S)));
+  if (typeof CompressionStream === "undefined") return "J" + b64.enc(json);
+  const z = new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+  return "Z" + b64.enc(z);
+}
+async function unpackState(s) {
+  const raw = b64.dec(s.slice(1));
+  const bytes = s[0] === "Z" ? new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer()) : raw;
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+let qrTimer = 0, qrStream = null, qrRaf = 0;
+function stopQr() {
+  clearInterval(qrTimer); qrTimer = 0; cancelAnimationFrame(qrRaf); qrRaf = 0;
+  if (qrStream) { qrStream.getTracks().forEach(t => t.stop()); qrStream = null; }
+}
+function openQrSheet() {
+  if (spinning) return;
+  if (DEMO) { toast("Im Demo-Modus geht kein Abgleich."); return; }
+  stopQr();
+  sheet("Ohne Internet abgleichen", `<p class="muted">So geht's ohne Netz: Ein Handy tippt <b>Zeigen</b>, das andere <b>Scannen</b> und hält die Kamera drauf, bis alle Teile da sind. Danach tauscht ihr die Rollen, dann haben beide alles.</p>
+    <div class="actions" style="margin-top:10px"><button class="btn pri" type="button" id="qrShow">Zeigen</button><button class="btn pri" type="button" id="qrScan">Scannen</button></div>
+    <div id="qrArea"></div>`);
+  $("#closeX").onclick = () => { stopQr(); closeSheet(); };
+  $("#qrShow").onclick = showQr;
+  $("#qrScan").onclick = scanQr;
+}
+async function showQr() {
+  stopQr();
+  const area = $("#qrArea"); area.innerHTML = `<p class="muted">Wird vorbereitet …</p>`;
+  try { await loadScript("qrcode.js"); } catch (e) { area.innerHTML = `<p class="muted">QR-Baustein fehlt. Einmal mit Internet öffnen, dann geht es auch offline.</p>`; return; }
+  const data = await packState();
+  const id = Math.random().toString(36).slice(2, 6), size = 500;
+  const parts = []; for (let i = 0; i < data.length; i += size) parts.push(data.slice(i, i + size));
+  const frames = parts.map((p, i) => { const q = qrcode(0, "L"); q.addData(`DR1|${id}|${i}|${parts.length}|${p}`); q.make(); return q.createSvgTag({ cellSize: 6, margin: 4, scalable: true }); });
+  area.innerHTML = `<div class="qrbox" id="qrBox"></div><p class="muted" style="text-align:center" id="qrInfo"></p>`;
+  let k = 0; const tick = () => { $("#qrBox").innerHTML = frames[k]; $("#qrInfo").textContent = `Teil ${k + 1} von ${frames.length} · läuft in Schleife`; k = (k + 1) % frames.length; };
+  tick(); if (frames.length > 1) qrTimer = setInterval(() => { if (!$("#qrBox")) return stopQr(); tick(); }, 700);
+}
+async function scanQr() {
+  stopQr();
+  const area = $("#qrArea"); area.innerHTML = `<p class="muted">Kamera wird gestartet …</p>`;
+  try { await loadScript("jsqr.js"); } catch (e) { area.innerHTML = `<p class="muted">Scan-Baustein fehlt. Einmal mit Internet öffnen, dann geht es auch offline.</p>`; return; }
+  try { qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }); }
+  catch (e) { area.innerHTML = `<p class="muted">Kein Kamerazugriff. Bitte in den iPhone-Einstellungen die Kamera für Safari erlauben.</p>`; return; }
+  area.innerHTML = `<video id="qrVid" class="qrvid" playsinline muted></video><p class="muted" style="text-align:center" id="qrInfo">Kamera auf den QR-Code halten …</p>`;
+  const v = $("#qrVid"); v.srcObject = qrStream; await v.play().catch(() => {});
+  const c = document.createElement("canvas"), g = c.getContext("2d", { willReadFrequently: true });
+  const got = {}; let want = 0, sid = "";
+  const loop = async () => {
+    if (!qrStream || !document.getElementById("qrVid")) return stopQr();
+    if (v.readyState >= 2) {
+      const w = 480, h = Math.round(v.videoHeight / v.videoWidth * w) || 360; c.width = w; c.height = h;
+      g.drawImage(v, 0, 0, w, h);
+      const r = jsQR(g.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" });
+      const m = r && /^DR1\|(\w+)\|(\d+)\|(\d+)\|(.*)$/s.exec(r.data);
+      if (m) {
+        if (m[1] !== sid) { sid = m[1]; want = +m[3]; for (const k in got) delete got[k]; }
+        got[+m[2]] = m[4];
+        const n = Object.keys(got).length;
+        $("#qrInfo").textContent = `${n} von ${want} Teilen empfangen …`;
+        if (n === want) { stopQr(); return finishQr(Array.from({ length: want }, (_, i) => got[i]).join("")); }
+      }
+    }
+    qrRaf = requestAnimationFrame(loop);
+  };
+  loop();
+}
+async function finishQr(data) {
+  try {
+    const remote = await unpackState(data);
+    const merged = prune(merge3(SY.code ? SY.base : {}, toShared(S), remote)) || {};
+    fromShared(merged, S); fixManual();
+    save(); render();
+    $("#qrArea").innerHTML = `<p class="muted"><b style="color:var(--sea)">Abgeglichen!</b> Jetzt das andere Handy scannen lassen (hier auf <b>Zeigen</b> tippen), dann haben beide denselben Stand.</p>`;
+    toast("Stand übernommen.");
+  } catch (e) { $("#qrArea").innerHTML = `<p class="muted">Das hat nicht geklappt. Bitte nochmal scannen.</p>`; }
+}
+
 // ---------- Start ----------
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · Stand 22.11.2026";
 if (fixManual()) save();
