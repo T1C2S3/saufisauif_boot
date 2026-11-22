@@ -127,6 +127,8 @@ h1 span { color: var(--coral); }
 .ver { cursor: pointer; }
 .fav { appearance: none; border: 0; background: none; font-size: 1.5rem; line-height: 1; color: var(--mist); padding: 2px 4px; }
 .fav.on { color: var(--coral); }
+.lockbox { display: grid; gap: 8px; background: var(--night); border: 1.5px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 8px; }
+.switch input:disabled + span, [data-ex]:disabled { opacity: .45; }
 .delh { padding: 6px 9px !important; font-size: .78rem !important; }
 .delh.sure { background: var(--coral); color: #fff; }
 .mode button.on { background: var(--sea); color: var(--ink); }
@@ -161,7 +163,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--sea); outli
 .row:last-child { border-bottom: 0; }
 .row .grow { flex: 1; min-width: 0; }
 .muted { color: var(--mist); font-size: .85rem; }
-input[type=text] {
+input[type=text], input[type=password] {
   width: 100%; font: 600 1rem var(--body); color: var(--foam); background: var(--night);
   border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 12px;
 }
@@ -418,7 +420,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "11"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "12"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 const NAMES = ["Christoph","Mark","Tim","Julian"];
 const DEFAULT = () => ({
@@ -703,6 +705,22 @@ function tags(d) {
   return (d.price ? `<span class="tag price">${esc(d.price)}</span>` : "") + (d.af ? `<span class="tag af">alkoholfrei</span>` : "");
 }
 
+// Filter-Schutz (nur Party-Schutz, kein echter Passwortschutz). Freigabe gilt, bis die App geschlossen wird.
+let filterAdmin = false;
+function loginBox(back) {
+  return `<form class="lockbox" id="loginForm"><b>🔒 Nur Christoph darf die Filter ändern</b>
+    <input type="text" id="lgUser" placeholder="Benutzer" autocomplete="off" autocapitalize="off">
+    <input type="password" id="lgPw" placeholder="Passwort" inputmode="numeric" autocomplete="off">
+    <button class="btn pri" type="submit">Anmelden</button></form>`;
+}
+function bindLogin(back) {
+  const f = $("#loginForm"); if (!f) return;
+  f.onsubmit = e => {
+    e.preventDefault();
+    if ($("#lgUser").value.trim().toLowerCase() === "christoph" && $("#lgPw").value === "0000") { filterAdmin = true; toast("Angemeldet, Filter frei."); openSheet(back); }
+    else { toast("Benutzer oder Passwort falsch."); $("#lgPw").value = ""; }
+  };
+}
 function openSheet(which) {
   if (spinning) return;
   if (which === "players") {
@@ -746,6 +764,7 @@ function openSheet(which) {
     const T = tab === "rad" ? S : S.ck;
     const where = tab === "rad" ? "ins Rad" : "in die Abhaken-Liste";
     sheet("Filter", `
+      ${filterAdmin ? `<div class="row"><div class="grow muted">🔓 Angemeldet als Christoph</div><button class="btn small" type="button" id="logout">Abmelden</button></div>` : loginBox()}
       <div class="mode" id="fTabs" style="margin-bottom:6px"><button type="button" data-ft="rad" class="${tab === "rad" ? "on" : ""}">Fürs Drehen</button><button type="button" data-ft="check" class="${tab === "check" ? "on" : ""}">Fürs Abhaken</button></div>
       ${sw("f-incl", T.inclOnly, "Nur inklusive", "Drinks mit Aufpreis (z. B. Kir Royal 10,70 €) raus")}
       ${sw("f-af", T.allowAf, "Alkoholfreie Drinks", "Mocktails mit " + where + " nehmen")}
@@ -755,6 +774,9 @@ function openSheet(which) {
     const upd = () => { $("#fcount").textContent = tab === "rad" ? `Im Rad: ${enabled().length} Drinks. Einzelne Drinks kannst du unter „Karte“ abwählen.` : `In der Abhaken-Liste: ${checkEnabled().length} Drinks. Das Rad bleibt davon unberührt.`; };
     upd();
     overlay.querySelectorAll("[data-ft]").forEach(b => b.onclick = () => { S.fTab = b.dataset.ft; openSheet("filter"); });
+    bindLogin("filter");
+    const lo = $("#logout"); if (lo) lo.onclick = () => { filterAdmin = false; openSheet("filter"); };
+    if (!filterAdmin) overlay.querySelectorAll(".switch input").forEach(i => i.disabled = true);
     $("#f-incl").onchange = e => { T.inclOnly = e.target.checked; save(); upd(); };
     $("#f-af").onchange = e => { T.allowAf = e.target.checked; save(); upd(); };
     Object.keys(CATS).forEach(k => { $("#c-" + k).onchange = e => { T.cats[k] = e.target.checked; save(); upd(); }; });
@@ -919,7 +941,9 @@ function openSheet(which) {
         return `<label class="drinkline ${off ? "off" : ""}"><input type="checkbox" data-ex="${esc(d.id)}" ${off ? "" : "checked"} aria-label="${esc(d.name)} im Rad"><div class="grow"><span class="name">${esc(d.name)}</span>${tags(d)}<div class="muted">${esc(d.ing)}</div></div></label>`;
       }).join("");
     }).join("");
-    sheet("Getränkekarte", `<p class="muted">${DRINKS.length} Drinks von der Bar-Karte. Haken weg = Drink kommt nie ins Rad (z. B. wenn ihn jemand nicht mag oder die Bar ihn nicht hat).</p>${groups}`);
+    sheet("Getränkekarte", `${filterAdmin ? "" : loginBox()}<p class="muted">${DRINKS.length} Drinks von der Bar-Karte. Haken weg = Drink kommt nie ins Rad (z. B. wenn ihn jemand nicht mag oder die Bar ihn nicht hat).</p>${groups}`);
+    bindLogin("menu");
+    if (!filterAdmin) overlay.querySelectorAll("[data-ex]").forEach(i => i.disabled = true);
     overlay.querySelectorAll("[data-ex]").forEach(cb => cb.addEventListener("change", () => {
       const id = cb.dataset.ex;
       S.excluded = S.excluded.filter(x => x !== id);
