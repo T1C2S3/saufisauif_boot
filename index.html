@@ -79,6 +79,18 @@ h1 span { color: var(--coral); }
 .chip.add { color: var(--mist); border-style: dashed; }
 .chip.guest { color: var(--gold); border-style: dashed; border-color: var(--gold); }
 .tag.gast { background: var(--violet); color: #fff; }
+#modeSw { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.bgmini { background: var(--deck); border: 1.5px solid var(--line); border-radius: 16px; padding: 10px 12px; display: grid; gap: 8px; }
+.bgmini .bghead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.bggrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.bggrid div { border: 1.5px solid var(--line); border-radius: 10px; padding: 6px 4px; min-height: 46px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: .72rem; font-weight: 700; line-height: 1.15; color: var(--foam); overflow-wrap: anywhere; }
+.bggrid div.hit { background: var(--sea); color: var(--ink); border-color: var(--sea); }
+.bggrid div.hit::before { content: "✓ "; }
+.bggrid div.now { outline: 3px solid var(--gold); outline-offset: 1px; }
+.bggrid div.line { background: var(--gold); border-color: var(--gold); color: var(--ink); }
+.bgbig { font: 800 2.6rem/1 var(--display); color: var(--gold); text-align: center; margin: 6px 0; letter-spacing: .04em; }
+.bgcard { margin: 10px 0 14px; }
+.bgcard h3 { margin: 0 0 6px; font: 800 1rem var(--display); }
 
 /* wheel */
 .stage { position: relative; display: grid; place-items: center; padding-top: 14px; }
@@ -251,8 +263,9 @@ input[type=text], input[type=password] {
     <span class="left" id="turnLeft"></span>
   </div>
   <div id="rateCard"></div>
+  <div id="bingoMini"></div>
 
-  <div class="mode" id="modeSw" role="group" aria-label="Spielmodus"><button type="button" data-mode="single">Einzeln</button><button type="button" data-mode="round">Runde (alle)</button><button type="button" data-mode="wahl" hidden>Wahlrunde</button></div>
+  <div class="mode" id="modeSw" role="group" aria-label="Spielmodus"><button type="button" data-mode="single">Einzeln</button><button type="button" data-mode="round">Runde (alle)</button><button type="button" data-mode="bingo">Bingo</button><button type="button" data-mode="wahl" hidden>Wahlrunde</button></div>
   <button class="spin" id="spinBtn" type="button">Drehen!</button>
 
   <div class="tools">
@@ -504,6 +517,7 @@ for (const k of Object.keys(CATS)) { if (!(k in S.cats)) S.cats[k] = true; if (!
 if (S.players.length && S.players.every(p => /^Spieler \d+$/.test(p.name))) {
   S.players = DEFAULT().players; S.history = []; S.cur = 0;
 }
+if (!("bingo" in S)) S.bingo = null;
 if (S.v !== 2) { S.inclOnly = true; S.allowAf = false; S.v = 2; }
 const save = () => { if (DEMO) return; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} syncSoon(); };
 
@@ -527,7 +541,7 @@ let spinning = false;
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function refillSegs() {
   const p = player();
-  const pool = p ? poolFor(p) : enabled();
+  const pool = S.mode === "bingo" && bingoOn() ? bingoPool() : p ? poolFor(p) : enabled();
   segs = shuffle(pool.slice()).slice(0, MAX_SEG);
 }
 function segColor(i, n) {
@@ -589,9 +603,9 @@ function prepPool(p) {
   return pool;
 }
 let lastSpinEntry = null;
-function spinFor(p, dur, rid) {
+function spinFor(p, dur, rid, fixed, bg) {
   return new Promise(resolve => {
-    const pool = prepPool(p);
+    const pool = fixed || prepPool(p);
     if (!pool) { resolve(null); return; }
     const winner = pool[Math.floor(Math.random() * pool.length)];
     if (!segs.some(d => d.id === winner.id) || segs.length === 0) refillSegsWith(winner, pool);
@@ -614,9 +628,10 @@ function spinFor(p, dur, rid) {
       else {
         rot = end % TAU;
         if (p.guest) { resolve(winner); return; } // Gasttrinker: kein Haken, kein Verlauf, keine Statistik
-        p.seen.push(winner.id);
+        if (!p.seen.includes(winner.id)) p.seen.push(winner.id);
         const h = { pid: p.id, id: winner.id, t: Date.now() };
         if (rid) h.rid = rid;
+        if (bg) h.bg = bg;
         S.history.unshift(h); lastSpinEntry = h;
         save();
         resolve(winner);
@@ -632,6 +647,7 @@ async function spin() {
   if (!enabled().length) { toast("Kein Drink passt zum Filter. Bitte Filter lockern."); openSheet("filter"); return; }
   if (S.mode === "round") return spinRound();
   if (S.mode === "wahl") return openWahl();
+  if (S.mode === "bingo") return spinBingo();
   const p = player();
   setBusy(true);
   const d = await spinFor(p, 4800);
@@ -701,6 +717,75 @@ function showGuestResult(g, d) {
 }
 document.addEventListener("click", e => { if (e.target.closest("#guestBtn")) openGuest(); });
 
+// ---------- Drink-Bingo: jeder hat eine 3x3-Karte, Treffer beim eigenen Dreh werden abgehakt ----------
+// Gedreht wird aus einem gemeinsamen Bingo-Pool (15 Drinks); jede Karte hat 9 davon. Die Drinks zählen ganz normal
+// (Verlauf, Statistik, Haken). Treffer werden aus dem Verlauf abgeleitet (h.bg), Rückgängig/Löschen nimmt sie also mit raus.
+const BG_POOL = 15;
+const BG_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const bingoOn = () => !!(S.bingo && S.bingo.id && S.bingo.pool);
+const bingoPool = () => bingoOn() ? S.bingo.pool.split("|").map(id => BY_ID[id]).filter(Boolean) : [];
+function bingoCard(p) {
+  if (!bingoOn()) return [];
+  S.bingo.cards = S.bingo.cards || {};
+  if (!S.bingo.cards[p.id]) { S.bingo.cards[p.id] = shuffle(bingoPool().map(d => d.id)).slice(0, 9).join("|"); save(); } // Spieler kam später dazu
+  return S.bingo.cards[p.id].split("|");
+}
+const bingoHits = p => new Set(S.history.filter(h => bingoOn() && h.bg === S.bingo.id && h.pid === p.id).map(h => h.id));
+function bingoLines(p) { const c = bingoCard(p), hit = bingoHits(p); return BG_LINES.filter(l => l.every(i => hit.has(c[i]))); }
+const bingoWinners = () => S.players.filter(p => bingoLines(p).length);
+function bingoGrid(p, now) {
+  const c = bingoCard(p), hit = bingoHits(p), inLine = new Set(bingoLines(p).flat());
+  return `<div class="bggrid">${c.map((id, i) => `<div class="${inLine.has(i) ? "line" : hit.has(id) ? "hit" : ""}${id === now ? " now" : ""}">${esc(short(BY_ID[id] ? BY_ID[id].name : "?", 28))}</div>`).join("")}</div>`;
+}
+function newBingo() {
+  const en = enabled();
+  if (en.length < 9) { toast("Für Bingo braucht der Filter mindestens 9 Drinks."); return false; }
+  const pool = shuffle(en.slice()).slice(0, Math.min(BG_POOL, en.length)).map(d => d.id);
+  S.bingo = { id: "b" + Date.now().toString(36), pool: pool.join("|"), cards: {} };
+  S.players.forEach(p => S.bingo.cards[p.id] = shuffle(pool.slice()).slice(0, 9).join("|"));
+  S.cur = 0; save(); render();
+  return true;
+}
+async function spinBingo() {
+  if (!bingoOn() || bingoWinners().length) { if (newBingo()) { toast("Neues Bingo! Jeder hat eine frische Karte."); openBingo(); } return; }
+  const p = player(); if (!p) return;
+  bingoCard(p);
+  setBusy(true);
+  const d = await spinFor(p, 4200, null, bingoPool(), S.bingo.id);
+  setBusy(false);
+  if (!d) return;
+  const h = lastSpinEntry;
+  const onCard = bingoCard(p).includes(d.id);
+  const won = bingoLines(p).length > 0;
+  const msg = won ? `<div class="bgbig">BINGO!</div><p class="muted" style="text-align:center"><b>${esc(p.name)}</b> hat eine volle Reihe. Die anderen trinken auf den Sieger!</p>`
+    : onCard ? `<p style="text-align:center"><b style="color:var(--sea)">Treffer!</b> Feld auf ${esc(p.name)}s Karte abgehakt.</p>`
+    : `<p class="muted" style="text-align:center"><b style="color:var(--coral)">Niete.</b> Nicht auf deiner Karte, getrunken wird trotzdem.</p>`;
+  confetti(); if (won) setTimeout(confetti, 700);
+  showResult(p, d, h, `<div class="bgcard">${msg}${bingoGrid(p, d.id)}</div>`);
+  renderBingoMini();
+  disq([{ p, d }]);
+}
+function renderBingoMini() {
+  const el = $("#bingoMini"); if (!el) return;
+  const p = player();
+  if (S.mode !== "bingo" || !bingoOn() || !p) { el.innerHTML = ""; return; }
+  const w = bingoWinners(), q = w[0] || p;
+  el.innerHTML = `<div class="bgmini"><div class="bghead"><b>${w.length ? "🏆 " : ""}Bingo-Karte ${esc(q.name)}</b><button class="btn small" type="button" id="bgAll">Alle Karten</button></div>${bingoGrid(q)}</div>`;
+  $("#bgAll").onclick = openBingo;
+}
+function openBingo() {
+  if (!bingoOn()) { sheet("Drink-Bingo", `<p class="muted">Noch kein Bingo gestartet.</p>`); return; }
+  const w = bingoWinners();
+  sheet("Drink-Bingo", `<p class="muted">Gedreht wird reihum aus ${bingoPool().length} Bingo-Drinks. Landet dein Drink auf deiner Karte, wird das Feld abgehakt. Wer zuerst eine Reihe hat (waagrecht, senkrecht oder diagonal), gewinnt. Die Drinks zählen ganz normal in Verlauf und Statistik.</p>
+    ${w.length ? `<div class="bgbig">BINGO!</div><p style="text-align:center"><b>${esc(w.map(q => q.name).join(" & "))}</b> gewinnt.</p>` : ""}
+    ${S.players.map(p => `<div class="bgcard"><h3>${w.includes(p) ? "🏆 " : ""}${esc(p.name)} <span class="muted">· ${bingoHits(p).size ? [...bingoHits(p)].filter(id => bingoCard(p).includes(id)).length : 0} / 9</span></h3>${bingoGrid(p)}</div>`).join("")}
+    <div class="row"><div class="grow"><b>Neues Bingo</b><div class="muted">Neue Karten für alle${w.length ? "" : " (mit Code)"}.</div></div><button class="btn small pri" type="button" id="bgNew">Neu starten</button></div>`);
+  $("#bgNew").onclick = () => {
+    const go = () => { if (newBingo()) { toast("Neues Bingo!"); openBingo(); } };
+    if (w.length) go(); else askCode($("#bgNew"), go);
+  };
+}
+
 function showOrder(rid) {
   const pmap = Object.fromEntries(S.players.map(p => [p.id, p.name]));
   const hs = S.history.filter(h => h.rid === rid && BY_ID[h.id]).reverse();
@@ -759,8 +844,9 @@ function renderTop() {
   renderRateCard();
   document.querySelectorAll("#modeSw button").forEach(b => b.classList.toggle("on", b.dataset.mode === (S.mode || "single")));
   if (S.mode === "wahl" && !S.wahlOn) S.mode = "single";
-  const wb = document.querySelector('#modeSw [data-mode="wahl"]'); wb.hidden = !S.wahlOn; $("#modeSw").classList.toggle("three", !!S.wahlOn);
-  $("#spinBtn").textContent = S.mode === "round" ? "Runde drehen!" : S.mode === "wahl" ? "Wahlrunde starten" : "Drehen!";
+  const wb = document.querySelector('#modeSw [data-mode="wahl"]'); wb.hidden = !S.wahlOn; 
+  $("#spinBtn").textContent = S.mode === "round" ? "Runde drehen!" : S.mode === "wahl" ? "Wahlrunde starten" : S.mode === "bingo" ? (bingoOn() && !bingoWinners().length ? "Bingo drehen!" : "Neues Bingo starten") : "Drehen!";
+  renderBingoMini();
   const p = player();
   const en = enabled();
   if (!p) { $("#turnName").textContent = "Erst Spieler eintragen"; $("#turnLeft").textContent = ""; }
@@ -770,6 +856,11 @@ function renderTop() {
     $("#turnLeft").textContent = left
       ? `Noch ${left} von ${en.length} Drinks offen`
       : `Alle ${en.length} Drinks durch – nächster Dreh startet neu`;
+    if (S.mode === "bingo") {
+      const w = bingoOn() ? bingoWinners() : [];
+      $("#turnName").textContent = !bingoOn() ? "Drink-Bingo" : w.length ? `BINGO für ${w.map(q => q.name).join(" & ")}!` : `Bingo: ${p.name} ist dran`;
+      $("#turnLeft").textContent = !bingoOn() ? "Jeder bekommt eine Karte mit 9 Drinks" : w.length ? "Neues Spiel? Unten starten." : `${bingoPool().length} Drinks im Bingo-Rad · Treffer auf deiner Karte zählen`;
+    }
   }
 }
 function render() { renderTop(); refillSegs(); draw(); }
@@ -781,7 +872,7 @@ function starsHTML(h, big) {
 function renderRateCard() {
   const el = $("#rateCard");
   let p = player();
-  if (S.mode === "round" || S.mode === "wahl") p = S.players.find(q => { const x = S.history.find(y => y.pid === q.id); return x && !x.r; }) || p;
+  if (S.mode === "round" || S.mode === "wahl" || S.mode === "bingo") p = S.players.find(q => { const x = S.history.find(y => y.pid === q.id); return x && !x.r; }) || p;
   const h = p && S.history.find(x => x.pid === p.id);
   if (!h || h.r || !BY_ID[h.id]) { el.innerHTML = ""; return; }
   el.innerHTML = `<div class="ratecard"><div class="grow"><b>${esc(p.name)}, wie war ${esc(BY_ID[h.id].name)}?</b><div class="muted">Kurz bewerten vor dem nächsten Dreh</div></div>${starsHTML(h)}</div>`;
@@ -1116,19 +1207,20 @@ function spiritCl(d) {
   return spiritOf(d) === "Likör & Bitter" ? 2 : 0;
 }
 
-function showResult(p, d, h) {
+function showResult(p, d, h, extra) {
   overlay.innerHTML = `<div class="scrim"><div class="sheet result" role="dialog" aria-label="Ergebnis">
     <div class="who">${esc(p.name)} bekommt</div>
     <div class="drink">${esc(d.name)}</div>
     <div class="ing">${esc(d.ing)}</div>
     <div class="meta"><span class="tag cat">${esc(CATS[d.cat])}</span>${d.price ? `<span class="tag price">${esc(d.price)}</span>` : `<span class="tag done">inklusive</span>`}${d.af ? `<span class="tag af">alkoholfrei</span>` : ""}</div>
+    ${extra || ""}
     <div class="actions three">
       <button class="btn warn" type="button" id="rCancel">Abbrechen</button>
       <button class="btn warn" type="button" id="rUndo">Nochmal drehen</button>
       <button class="btn pri" type="button" id="rNext">Prost!</button>
     </div>
   </div></div>`;
-  $("#rNext").onclick = () => closeSheet();
+  $("#rNext").onclick = () => { if (h && h.bg && S.players.length) { const i = S.players.indexOf(p); S.cur = ((i < 0 ? S.cur : i) + 1) % S.players.length; save(); } closeSheet(); };
   const takeBack = () => {
     if (h) { removeEntries(x => sameEntry(x, h)); const i = S.players.indexOf(p); if (i >= 0) S.cur = i; save(); }
     else undo();
@@ -1221,13 +1313,14 @@ function toShared(st) {
   });
   st.history.forEach(h => {
     const k = h.pid + "_" + h.t;
-    o.hist[k] = Object.assign({ pid: h.pid, id: h.id, t: h.t }, h.rid ? { rid: h.rid } : {}, h.m ? { m: h.m } : {});
+    o.hist[k] = Object.assign({ pid: h.pid, id: h.id, t: h.t }, h.rid ? { rid: h.rid } : {}, h.m ? { m: h.m } : {}, h.bg ? { bg: h.bg } : {});
     if (h.r) o.rate[k] = h.r;
   });
   for (const [k, v] of Object.entries(st.cats)) o.set.cats[k] = !!v;
   o.set.ck = { inclOnly: !!st.ck.inclOnly, allowAf: !!st.ck.allowAf, cats: {} };
   for (const [k, v] of Object.entries(st.ck.cats)) o.set.ck.cats[k] = !!v;
   st.excluded.forEach(id => o.excl[fk(id)] = true);
+  if (st.bingo && st.bingo.id) o.bingo = { id: st.bingo.id, pool: st.bingo.pool, cards: Object.assign({}, st.bingo.cards) };
   return o;
 }
 function fromShared(o, st) {
@@ -1237,7 +1330,7 @@ function fromShared(o, st) {
   st.players = pl.map(([id, p]) => ({ id, name: p.name || "?", seen: Object.keys((o.seen || {})[id] || {}).map(unfk), fav: Object.keys((o.fav || {})[id] || {}).map(unfk) }));
   st.cur = Math.max(0, st.players.findIndex(p => p.id === curId));
   const rate = o.rate || {};
-  st.history = Object.entries(o.hist || {}).map(([k, h]) => Object.assign({ pid: h.pid, id: h.id, t: h.t }, h.rid ? { rid: h.rid } : {}, h.m ? { m: h.m } : {}, rate[k] ? { r: rate[k] } : {}))
+  st.history = Object.entries(o.hist || {}).map(([k, h]) => Object.assign({ pid: h.pid, id: h.id, t: h.t }, h.rid ? { rid: h.rid } : {}, h.m ? { m: h.m } : {}, h.bg ? { bg: h.bg } : {}, rate[k] ? { r: rate[k] } : {}))
     .sort((a, b) => b.t - a.t);
   const set = o.set || {};
   if ("inclOnly" in set) st.inclOnly = !!set.inclOnly;
@@ -1249,6 +1342,7 @@ function fromShared(o, st) {
     for (const [k, v] of Object.entries(set.ck.cats || {})) if (k in st.ck.cats) st.ck.cats[k] = !!v;
   }
   st.excluded = Object.keys(o.excl || {}).map(unfk);
+  st.bingo = o.bingo && o.bingo.id ? { id: o.bingo.id, pool: o.bingo.pool || "", cards: Object.assign({}, o.bingo.cards) } : null;
 }
 const isObj = v => v && typeof v === "object" && !Array.isArray(v);
 const same = (a, b) => stable(a) === stable(b);
