@@ -77,6 +77,8 @@ h1 span { color: var(--coral); }
 .chip.on { background: var(--gold); color: var(--ink); border-color: var(--gold); }
 .chip.on small { color: #5a4200; }
 .chip.add { color: var(--mist); border-style: dashed; }
+.chip.guest { color: var(--gold); border-style: dashed; border-color: var(--gold); }
+.tag.gast { background: var(--violet); color: #fff; }
 
 /* wheel */
 .stage { position: relative; display: grid; place-items: center; padding-top: 14px; }
@@ -479,7 +481,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "20"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "21"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -611,6 +613,7 @@ function spinFor(p, dur, rid) {
       if (t < 1) requestAnimationFrame(frame);
       else {
         rot = end % TAU;
+        if (p.guest) { resolve(winner); return; } // Gasttrinker: kein Haken, kein Verlauf, keine Statistik
         p.seen.push(winner.id);
         const h = { pid: p.id, id: winner.id, t: Date.now() };
         if (rid) h.rid = rid;
@@ -654,6 +657,50 @@ async function spinRound() {
   showOrder(rid);
   disq(got);
 }
+// ---------- Gasttrinker: einmal spontan drehen, zählt nirgends ----------
+const GKEY = KEY + "-gast";
+function openGuest() {
+  if (spinning) return;
+  if (!enabled().length) { toast("Kein Drink passt zum Filter. Bitte Filter lockern."); return; }
+  let last = "";
+  try { last = localStorage.getItem(GKEY) || ""; } catch (e) {}
+  sheet("Gasttrinker", `<p class="muted">Ein Gast darf einmal drehen. Der Dreh zählt nicht: kein Verlauf, keine Statistik, keine Haken, keine Bewertung.</p>
+    <form class="row" id="guestForm"><div class="grow"><input type="text" id="guestName" placeholder="Name vom Gast (optional)" value="${esc(last)}" autocomplete="off" enterkeyhint="go" maxlength="24"></div><button class="btn pri" type="submit">Drehen!</button></form>`);
+  $("#guestForm").onsubmit = e => {
+    e.preventDefault();
+    const name = $("#guestName").value.trim();
+    try { localStorage.setItem(GKEY, name); } catch (err) {}
+    overlay.innerHTML = "";
+    spinGuest(name || "Gast");
+  };
+}
+async function spinGuest(name) {
+  const g = { id: "gast", name, seen: [], guest: true };
+  setBusy(true);
+  $("#turnName").textContent = `${name} (Gast) dreht …`; $("#turnLeft").textContent = "zählt nicht in die Statistik";
+  const d = await spinFor(g, 4200);
+  setBusy(false);
+  if (!d) { renderTop(); return; }
+  confetti();
+  showGuestResult(g, d);
+  disq([{ p: g, d }]);
+}
+function showGuestResult(g, d) {
+  overlay.innerHTML = `<div class="scrim"><div class="sheet result" role="dialog" aria-label="Ergebnis Gast">
+    <div class="who">${esc(g.name)} bekommt</div>
+    <div class="drink">${esc(d.name)}</div>
+    <div class="ing">${esc(d.ing)}</div>
+    <div class="meta"><span class="tag gast">🍹 Gastdrink · zählt nicht</span><span class="tag cat">${esc(CATS[d.cat])}</span>${d.price ? `<span class="tag price">${esc(d.price)}</span>` : `<span class="tag done">inklusive</span>`}${d.af ? `<span class="tag af">alkoholfrei</span>` : ""}</div>
+    <div class="actions">
+      <button class="btn warn" type="button" id="gAgain">Nochmal</button>
+      <button class="btn pri" type="button" id="gOk">Prost!</button>
+    </div>
+  </div></div>`;
+  $("#gOk").onclick = closeSheet;
+  $("#gAgain").onclick = () => askCode($("#gAgain"), () => { overlay.innerHTML = ""; spinGuest(g.name); });
+}
+document.addEventListener("click", e => { if (e.target.closest("#guestBtn")) openGuest(); });
+
 function showOrder(rid) {
   const pmap = Object.fromEntries(S.players.map(p => [p.id, p.name]));
   const hs = S.history.filter(h => h.rid === rid && BY_ID[h.id]).reverse();
@@ -708,7 +755,7 @@ function renderTop() {
   const el = $("#players");
   el.innerHTML = S.players.map((p, i) =>
     `<button class="chip ${i === S.cur ? "on" : ""}" type="button" data-pi="${i}">${esc(p.name)} <small>${p.seen.length}</small></button>`
-  ).join("") + `<button class="chip add" type="button" data-open="players">+ Spieler</button>`;
+  ).join("") + `<button class="chip add" type="button" data-open="players">+ Spieler</button><button class="chip guest" type="button" id="guestBtn">🍹 Gast</button>`;
   renderRateCard();
   document.querySelectorAll("#modeSw button").forEach(b => b.classList.toggle("on", b.dataset.mode === (S.mode || "single")));
   if (S.mode === "wahl" && !S.wahlOn) S.mode = "single";
@@ -1573,7 +1620,8 @@ async function finishQr(data) {
 }
 
 // ---------- Start ----------
-document.getElementById("ver").textContent = "Version " + APP_VERSION + " · Stand 22.11.2026";
+const APP_BUILD = "24.11.2026, 07:30 Uhr"; // deutsche Zeit des Updates
+document.getElementById("ver").textContent = "Version " + APP_VERSION + " · " + APP_BUILD;
 if (fixManual()) save();
 render();
 sizeCanvas();
