@@ -812,13 +812,13 @@ document.addEventListener("click", e => { if (e.target.closest("#bingoBtn")) { i
 // ---------- Drink-Bingo im Hintergrund: läuft bei jedem normalen Dreh mit, ohne extra Bingo-Drehen ----------
 // Jeder hat eine 3x3-Karte mit 9 einzelnen Drinks aus dem aktuellen Rad (laut Filter, die er noch nicht hatte).
 // Jeder gedrehte Drink (Einzeln, Runde, Wahlrunde) hakt das Feld ab, wenn er auf der eigenen Karte steht.
-// Damit ein Bingo an einem Abend klappt, landet das Rad bei jedem Dreh mit BG_BOOST Wahrscheinlichkeit
-// auf einem noch offenen Drink der eigenen Karte (ohne Bonus wären es rund 40 Runden bis zum ersten Bingo).
+// Optionaler Bonus: mit BG_BOOST Wahrscheinlichkeit landet das Rad auf einem offenen Karten-Drink.
+// Aktuell aus (0), Bingo dauert dann meist rund 40 Runden.
 // Wer eine Reihe hat, gewinnt; dann ist das Bingo eingefroren, bis die Prämie durch ist, danach startet ein neues.
 // S.bingo = { id, v: 3, start, won, pool: "drink|drink|…" (Rad beim Start), cards: { pid: "9 Drinks" }, prize }
 // Treffer werden aus dem Verlauf abgeleitet (Einträge ab start bis won, ohne Abhaken-Einträge und Straf-Drinks).
 const BG_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-const BG_BOOST = 0.35;
+const BG_BOOST = 0; // Christoph 27.11.: ohne Bonus, das Rad dreht rein zufällig
 const bingoOn = () => !!(S.bingo && S.bingo.id && S.bingo.pool && S.bingo.v === 3);
 // Karte hängt nur von Bingo-ID + Spieler-ID ab: jedes Handy erzeugt für denselben Spieler dieselbe Karte.
 function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -895,7 +895,7 @@ function renderBingoMini() {
 function openBingo() {
   if (!bingoOn()) { sheet("Drink-Bingo", `<p class="muted">Bingo startet automatisch mit dem nächsten Dreh.</p>`); return; }
   const w = bingoWinners();
-  sheet("Drink-Bingo", `<p class="muted">Bingo läuft im Hintergrund mit, ihr dreht ganz normal (Einzeln, Runde oder Wahlrunde). Jeder hat 9 Drinks aus dem aktuellen Rad auf seiner Karte. Landet dein Dreh auf einem davon, wird das Feld abgehakt. Damit es an einem Abend klappt, landet das Rad etwas öfter auf offenen Drinks deiner Karte. Abhaken in der Liste und Straf-Drinks zählen nicht. Wer zuerst eine Reihe hat (waagrecht, senkrecht oder diagonal), gewinnt; in einer Runde wird erst am Ende gewertet. Nach der Prämie startet mit dem nächsten Dreh ein neues Bingo.</p>
+  sheet("Drink-Bingo", `<p class="muted">Bingo läuft im Hintergrund mit, ihr dreht ganz normal (Einzeln, Runde oder Wahlrunde). Jeder hat 9 Drinks aus dem aktuellen Rad auf seiner Karte. Landet dein Dreh auf einem davon, wird das Feld abgehakt. Das Rad dreht ganz normal zufällig, ein Bingo kann also auch mal über mehrere Abende laufen. Abhaken in der Liste und Straf-Drinks zählen nicht. Wer zuerst eine Reihe hat (waagrecht, senkrecht oder diagonal), gewinnt; in einer Runde wird erst am Ende gewertet. Nach der Prämie startet mit dem nächsten Dreh ein neues Bingo.</p>
     ${w.length ? `<div class="bgbig">BINGO!</div><p style="text-align:center"><b>${esc(w.map(q => q.name).join(" & "))}</b> gewinnt.</p>${prizePending() ? `<div class="actions" style="grid-template-columns:1fr"><button class="btn pri" type="button" id="bgPrizeB">🍸 Bingo-Prämie: Cocktail &amp; Bewertung</button></div>` : ""}` : ""}
     ${S.players.map(p => `<div class="bgcard"><h3>${w.includes(p) ? "🏆 " : ""}${esc(p.name)} <span class="muted">· ${bingoCount(p)} / 9</span></h3>${bingoGrid(p)}</div>`).join("")}
     <div class="row"><div class="grow"><b>Neues Bingo</b><div class="muted">Neue Karten für alle${w.length && !prizePending() ? "" : " (mit Code)"}.</div></div><button class="btn small pri" type="button" id="bgNew">Neu starten</button></div>`);
