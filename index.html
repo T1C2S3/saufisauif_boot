@@ -501,7 +501,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "23"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "24"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -1055,7 +1055,7 @@ function tags(d) {
 }
 
 // Filter-Schutz (nur Party-Schutz, kein echter Passwortschutz). Freigabe gilt, bis die App geschlossen wird.
-let filterAdmin = false, countEdit = false;
+let filterAdmin = false, countEdit = false, statRange = ""; // statRange: heute | gestern | alle
 function loginBox(back) {
   return `<form class="lockbox" id="loginForm"><b>🔒 Nur Christoph darf die Filter ändern</b>
     <input type="text" id="lgUser" placeholder="Benutzer" autocomplete="off" autocapitalize="off">
@@ -1194,8 +1194,16 @@ function openSheet(which) {
     };
   }
   if (which === "stats") {
-    const H = S.history.slice().reverse().filter(h => BY_ID[h.id]);
-    if (!H.length) { sheet("Statistik", `<p class="muted">Noch nichts gedreht. Nach den ersten Runden steht hier, wer wie viel hatte.</p>`); return; }
+    // Zeitraum: ein Party-Tag geht von 6 Uhr bis 6 Uhr am nächsten Morgen (Handy-Uhrzeit)
+    const ALL = S.history.slice().reverse().filter(h => BY_ID[h.id]);
+    const day0 = t => { const d = new Date(t - 6 * 36e5); d.setHours(0, 0, 0, 0); return d.getTime() + 6 * 36e5; };
+    const today = day0(Date.now()), yest = today - 864e5;
+    const RANGES = { heute: ["Heute", h => h.t >= today], gestern: ["Gestern", h => h.t >= yest && h.t < today], alle: ["Ganze Reise", () => true] };
+    if (!RANGES[statRange]) statRange = ALL.some(RANGES.heute[1]) ? "heute" : "alle";
+    const rtabs = `<div class="players" style="margin-bottom:10px">${Object.entries(RANGES).map(([k, [l, f]]) => `<button class="chip ${k === statRange ? "on" : ""}" type="button" data-sr="${k}">${l} <small>${ALL.filter(f).length}</small></button>`).join("")}</div>`;
+    const bindR = () => overlay.querySelectorAll("[data-sr]").forEach(b => b.onclick = () => { statRange = b.dataset.sr; openSheet("stats"); });
+    const H = ALL.filter(RANGES[statRange][1]);
+    if (!H.length) { sheet("Statistik", rtabs + `<p class="muted">${ALL.length ? (statRange === "heute" ? "Heute noch nichts gedreht. Ein Tag zählt hier von 6 Uhr morgens bis 6 Uhr am nächsten Morgen." : "An dem Tag wurde nichts gedreht.") : "Noch nichts gedreht. Nach den ersten Runden steht hier, wer wie viel hatte."}</p>`); bindR(); return; }
     const pmap = Object.fromEntries(S.players.map(p => [p.id, p.name]));
     const fmtT = t => new Date(t).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
     const per = {};
@@ -1244,14 +1252,16 @@ function openSheet(which) {
     const facts = `<div class="row"><div class="grow">Beliebteste Spirituose: <b>${spirits ? esc(spirits[0]) + " (" + spirits[1] + "×)" : "–"}</b></div></div>
       <div class="row"><div class="grow">Aufwendigster Drink: <b>${esc(longest.name)}</b> <span class="muted">(${longest.ing.split(",").length} Zutaten)</span></div></div>
       ${paid.length ? `<div class="row"><div class="grow">Mit Aufpreis: <b>${paid.length} Drinks, ${sum.toFixed(2).replace(".", ",")} €</b></div></div>` : ""}`;
-    const text = `Drink-Rad Mein Schiff Flow – ${new Date(H[0].t).toLocaleDateString("de-DE")}\n${H.length} Drinks, ${fmtT(H[0].t)}–${fmtT(H[H.length - 1].t)}\n\n` +
+    const text = `Drink-Rad Mein Schiff Flow – ${statRange === "alle" ? "ganze Reise ab " : ""}${new Date(H[0].t).toLocaleDateString("de-DE")}\n${H.length} Drinks, ${fmtT(H[0].t)}–${fmtT(H[H.length - 1].t)}\n\n` +
       ranking.map((r, i) => `${i + 1}. ${r.name}: ${r.ds.length} Drinks (ca. ${r.cl} cl Schnaps)\n   ${H.filter(h => h.pid === r.pid).map(h => BY_ID[h.id].name + (h.r ? " " + h.r + "★" : "")).join(", ")}`).join("\n") +
       (tops.length ? `\n\nTop: ${tops.map(x => x.d.name + " " + f1(x.a) + "★").join(", ")}` : "") +
       (flops.length ? `\nFlop: ${flops.map(x => x.d.name + " " + f1(x.a) + "★").join(", ")}` : "");
-    sheet("Statistik", `${kpis}<div class="cathead">Rangliste</div>${rank}${topflop}<div class="cathead">Drinks pro Stunde</div>${hours}<div class="cathead">Fun Facts</div>${facts}
+    sheet("Statistik", `${rtabs}${kpis}<div class="cathead">Rangliste</div>${rank}${topflop}<div class="cathead">Drinks pro Stunde</div>${hours}<div class="cathead">Fun Facts</div>${facts}
       <div class="row"><button class="btn pri" type="button" id="copyStats">Als Text kopieren</button><span class="muted">für die WhatsApp-Gruppe</span></div>
       <textarea id="statsText" readonly hidden style="width:100%;height:160px;background:var(--night);color:var(--foam);border-radius:12px;border:1.5px solid var(--line);padding:10px;font:inherit">${esc(text)}</textarea>
+      <p class="muted">Heute und Gestern zählen jeweils von 6 Uhr morgens bis 6 Uhr am nächsten Morgen, die Nacht gehört also noch zum Abend davor.</p>
       <p class="muted">Schnaps-Menge ist eine grobe Schätzung: 4 cl pro Cocktail mit Spirituose, 2 cl bei Likör oder Bitter, Sekt und Wein nicht mitgezählt.</p>`);
+    bindR();
     $("#copyStats").onclick = async () => {
       try { await navigator.clipboard.writeText(text); toast("Statistik kopiert."); }
       catch (e) { const ta = $("#statsText"); ta.hidden = false; ta.focus(); ta.select(); toast("Text markiert, jetzt kopieren."); }
@@ -1893,7 +1903,7 @@ async function finishQr(data) {
 }
 
 // ---------- Start ----------
-const APP_BUILD = "27.11.2026, 10:00 Uhr"; // deutsche Zeit des Updates
+const APP_BUILD = "27.11.2026, 10:45 Uhr"; // deutsche Zeit des Updates
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · " + APP_BUILD;
 if (fixManual()) save();
 render();
