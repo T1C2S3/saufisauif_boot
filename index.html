@@ -501,7 +501,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "22"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "23"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -525,6 +525,7 @@ if (S.players.length && S.players.every(p => /^Spieler \d+$/.test(p.name))) {
   S.players = DEFAULT().players; S.history = []; S.cur = 0;
 }
 if (!("bingo" in S)) S.bingo = null;
+if (!S.gone || typeof S.gone !== "object") S.gone = {}; // entfernte Spieler (id -> Zeit), damit sie beim Abgleich nicht zurückkommen
 if (S.v !== 2) { S.inclOnly = true; S.allowAf = false; S.v = 2; }
 const save = () => { if (DEMO) return; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} syncSoon(); };
 
@@ -732,12 +733,28 @@ const BG_POOL = 15;
 const BG_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 const bingoOn = () => !!(S.bingo && S.bingo.id && S.bingo.pool);
 const bingoPool = () => bingoOn() ? S.bingo.pool.split("|").map(id => BY_ID[id]).filter(Boolean) : [];
+// Karte hängt nur von Bingo-ID + Spieler-ID ab: jedes Handy erzeugt für denselben Spieler dieselbe Karte.
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function seededShuffle(a, seed) {
+  let x = hashStr(seed) || 1;
+  const rnd = () => { x = (x + 0x6D2B79F5) | 0; let t = Math.imul(x ^ (x >>> 15), 1 | x); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+const makeCard = pid => seededShuffle(S.bingo.pool.split("|"), S.bingo.id + "|" + pid).slice(0, 9).join("|");
 function bingoCard(p) {
   if (!bingoOn()) return [];
   S.bingo.cards = S.bingo.cards || {};
-  if (!S.bingo.cards[p.id]) { S.bingo.cards[p.id] = shuffle(bingoPool().map(d => d.id)).slice(0, 9).join("|"); save(); } // Spieler kam später dazu
+  if (!S.bingo.cards[p.id]) S.bingo.cards[p.id] = makeCard(p.id); // Spieler kam später dazu
   return S.bingo.cards[p.id].split("|");
 }
+// Pro Spieler kommt jeder Bingo-Drink erst wieder, wenn er alle Bingo-Drinks einmal hatte.
+function bingoPoolFor(p) {
+  const all = bingoPool(), had = new Set(S.history.filter(h => h.bg === S.bingo.id && h.pid === p.id).map(h => h.id));
+  const open = all.filter(d => !had.has(d.id));
+  return open.length ? open : all;
+}
+const bingoCount = p => { const c = bingoCard(p); return [...bingoHits(p)].filter(id => c.includes(id)).length; };
 const bingoHits = p => new Set(S.history.filter(h => bingoOn() && h.bg === S.bingo.id && h.pid === p.id).map(h => h.id));
 function bingoLines(p) { const c = bingoCard(p), hit = bingoHits(p); return BG_LINES.filter(l => l.every(i => hit.has(c[i]))); }
 const bingoWinners = () => S.players.filter(p => bingoLines(p).length);
@@ -750,30 +767,42 @@ function newBingo() {
   if (en.length < 9) { toast("Für Bingo braucht der Filter mindestens 9 Drinks."); return false; }
   const pool = shuffle(en.slice()).slice(0, Math.min(BG_POOL, en.length)).map(d => d.id);
   S.bingo = { id: "b" + Date.now().toString(36), pool: pool.join("|"), cards: {} };
-  S.players.forEach(p => S.bingo.cards[p.id] = shuffle(pool.slice()).slice(0, 9).join("|"));
+  S.players.forEach(p => S.bingo.cards[p.id] = makeCard(p.id));
   S.cur = 0; save(); render();
   return true;
 }
+// Bingo wird immer für alle gedreht: jede Runde dreht jeder Spieler einmal (reihum, auf einem Handy).
+// Gewertet wird erst am Ende der Runde, so hat jeder gleich viele Drehs. Mehrere Reihen in derselben Runde = mehrere Sieger.
 async function spinBingo() {
   if (prizePending()) { openPrize(); return; }
   if (!bingoOn() || bingoWinners().length) { if (newBingo()) { toast("Neues Bingo! Jeder hat eine frische Karte."); openBingo(); } return; }
-  const p = player(); if (!p) return;
-  bingoCard(p);
+  if (!bingoPool().length) { toast("Bingo-Drinks fehlen. Bitte neues Bingo starten."); return; }
   setBusy(true);
-  const d = await spinFor(p, 4200, null, bingoPool(), S.bingo.id);
+  const rid = "g" + Date.now().toString(36), bid = S.bingo.id, got = [];
+  for (let i = 0; i < S.players.length; i++) {
+    const p = S.players[i]; bingoCard(p);
+    S.cur = i; renderTop();
+    const pool = bingoPoolFor(p);
+    segs = shuffle(pool.slice()).slice(0, MAX_SEG); draw();
+    $("#turnName").textContent = `Bingo: ${p.name} dreht …`;
+    await wait(350);
+    const d = await spinFor(p, 2600, rid, pool, bid);
+    if (d) { got.push({ p, d }); toast(`${p.name}: ${d.name}${bingoCard(p).includes(d.id) ? " · Treffer!" : ""}`); renderTop(); }
+    await wait(900);
+  }
+  S.cur = 0; save();
   setBusy(false);
-  if (!d) return;
-  const h = lastSpinEntry;
-  const onCard = bingoCard(p).includes(d.id);
-  const won = bingoLines(p).length > 0;
-  const msg = won ? `<div class="bgbig">BINGO!</div><p class="muted" style="text-align:center"><b>${esc(p.name)}</b> hat eine volle Reihe. Die anderen trinken auf den Sieger! Jetzt darf ${esc(p.name)} einen Cocktail aussuchen.</p>`
-    : onCard ? `<p style="text-align:center"><b style="color:var(--sea)">Treffer!</b> Feld auf ${esc(p.name)}s Karte abgehakt.</p>`
-    : `<p class="muted" style="text-align:center"><b style="color:var(--coral)">Niete.</b> Nicht auf deiner Karte, getrunken wird trotzdem.</p>`;
-  confetti(); if (won) setTimeout(confetti, 700);
-  showResult(p, d, h, `<div class="bgcard">${msg}${bingoGrid(p, d.id)}</div>`);
-  if (won) { $("#rNext").textContent = "Cocktail wählen"; $("#rNext").onclick = () => { closeSheet(); openPrize(); }; }
-  renderBingoMini();
-  disq([{ p, d }]);
+  confetti(); if (bingoWinners().length) setTimeout(confetti, 700);
+  showOrder(rid);
+  disq(got);
+}
+function bingoRoundHTML(hs) {
+  const w = bingoWinners();
+  const rows = hs.map(h => { const p = S.players.find(q => q.id === h.pid); if (!p) return "";
+    const hit = bingoCard(p).includes(h.id);
+    return `<div class="row"><div class="grow"><b>${esc(p.name)}</b> · ${esc(BY_ID[h.id].name)}<div class="muted">${esc(BY_ID[h.id].ing)}</div></div>${hit ? `<span class="ok">✓ Treffer</span>` : `<span class="muted">Niete</span>`} <span class="muted" style="font-variant-numeric:tabular-nums">${bingoCount(p)}/9</span></div>`; }).join("");
+  return `<div class="cathead">Bingo-Karten</div>${w.length ? `<div class="bgbig">BINGO!</div><p style="text-align:center"><b>${esc(w.map(q => q.name).join(" & "))}</b> ${w.length > 1 ? "haben" : "hat"} eine volle Reihe. Die anderen trinken auf ${w.length > 1 ? "die Sieger" : "den Sieger"}!</p>` : ""}${rows}
+    <div class="actions" style="grid-template-columns:1fr;margin-top:8px"><button class="btn" type="button" id="oCards">Alle Karten ansehen</button></div>`;
 }
 function renderBingoMini() {
   const el = $("#bingoMini"); if (!el) return;
@@ -787,9 +816,9 @@ function renderBingoMini() {
 function openBingo() {
   if (!bingoOn()) { sheet("Drink-Bingo", `<p class="muted">Noch kein Bingo gestartet.</p>`); return; }
   const w = bingoWinners();
-  sheet("Drink-Bingo", `<p class="muted">Gedreht wird reihum aus ${bingoPool().length} Bingo-Drinks. Landet dein Drink auf deiner Karte, wird das Feld abgehakt. Wer zuerst eine Reihe hat (waagrecht, senkrecht oder diagonal), gewinnt. Die Drinks zählen ganz normal in Verlauf und Statistik.</p>
+  sheet("Drink-Bingo", `<p class="muted">Jede Bingo-Runde dreht jeder einmal, alles auf einem Handy. Gedreht wird aus ${bingoPool().length} Bingo-Drinks, jeder Drink kommt pro Spieler erst wieder, wenn er alle hatte. Landet dein Drink auf deiner Karte, wird das Feld abgehakt. Gewertet wird am Ende der Runde: Wer dann eine Reihe hat (waagrecht, senkrecht oder diagonal), gewinnt. Schaffen es mehrere in derselben Runde, gewinnen alle. Die Drinks zählen ganz normal in Verlauf und Statistik.</p>
     ${w.length ? `<div class="bgbig">BINGO!</div><p style="text-align:center"><b>${esc(w.map(q => q.name).join(" & "))}</b> gewinnt.</p><div class="actions" style="grid-template-columns:1fr"><button class="btn pri" type="button" id="bgPrizeB">🍸 Bingo-Prämie: Cocktail &amp; Bewertung</button></div>` : ""}
-    ${S.players.map(p => `<div class="bgcard"><h3>${w.includes(p) ? "🏆 " : ""}${esc(p.name)} <span class="muted">· ${bingoHits(p).size ? [...bingoHits(p)].filter(id => bingoCard(p).includes(id)).length : 0} / 9</span></h3>${bingoGrid(p)}</div>`).join("")}
+    ${S.players.map(p => `<div class="bgcard"><h3>${w.includes(p) ? "🏆 " : ""}${esc(p.name)} <span class="muted">· ${bingoCount(p)} / 9</span></h3>${bingoGrid(p)}</div>`).join("")}
     <div class="row"><div class="grow"><b>Neues Bingo</b><div class="muted">Neue Karten für alle${w.length && !prizePending() ? "" : " (mit Code)"}.</div></div><button class="btn small pri" type="button" id="bgNew">Neu starten</button></div>`);
   $("#bgNew").onclick = () => {
     const go = () => { if (newBingo()) { toast("Neues Bingo!"); openBingo(); } };
@@ -906,13 +935,14 @@ function showOrder(rid) {
   hs.forEach(h => (groups[h.id] = groups[h.id] || []).push(pmap[h.pid] || "?"));
   const total = Object.values(groups).reduce((s, g) => s + g.length, 0);
   const paid = hs.filter(h => BY_ID[h.id].price);
+  const isBg = bingoOn() && hs.some(h => h.bg === S.bingo.id);
   overlay.innerHTML = `<div class="scrim"><div class="sheet" role="dialog" aria-label="Bestellung">
     <h2>Bestellung für die Bar<button class="x" type="button" aria-label="Schließen" id="closeX">✕</button></h2>
     <p class="muted">${total} Drinks · zum Vorzeigen am Tresen</p>
     <div class="order">${Object.entries(groups).map(([id, names]) => `<div class="orow"><span class="cnt">${names.length}×</span><div class="grow"><div class="oname">${esc(BY_ID[id].name)}</div><div class="muted">${esc(names.join(", "))}${BY_ID[id].price ? ` · <b style="color:var(--coral)">${esc(BY_ID[id].price)}</b>` : ""}</div></div></div>`).join("")}</div>
     ${paid.length ? `<p class="muted">${paid.length} Drink(s) mit Aufpreis.</p>` : ""}
-    <div class="cathead">Wer bekommt was</div>
-    ${hs.map(h => `<div class="row"><div class="grow"><b>${esc(pmap[h.pid] || "?")}</b> · ${esc(BY_ID[h.id].name)}<div class="muted">${esc(BY_ID[h.id].ing)}</div></div></div>`).join("")}
+    ${isBg ? bingoRoundHTML(hs) : `<div class="cathead">Wer bekommt was</div>
+    ${hs.map(h => `<div class="row"><div class="grow"><b>${esc(pmap[h.pid] || "?")}</b> · ${esc(BY_ID[h.id].name)}<div class="muted">${esc(BY_ID[h.id].ing)}</div></div></div>`).join("")}`}
     <div class="actions three" style="margin-top:14px">
       <button class="btn warn" type="button" id="oCancel">Abbrechen</button>
       <button class="btn warn" type="button" id="oRedo">Runde neu</button>
@@ -920,6 +950,10 @@ function showOrder(rid) {
     </div></div></div>`;
   $("#closeX").onclick = closeSheet;
   $("#oOk").onclick = closeSheet;
+  if (isBg) {
+    $("#oCards").onclick = openBingo;
+    if (bingoWinners().length) { $("#oOk").textContent = "🏆 Cocktail wählen"; $("#oOk").onclick = () => { closeSheet(); openPrize(); }; }
+  }
   $("#oCancel").onclick = () => askCode($("#oCancel"), () => {
     removeEntries(h => h.rid === rid); S.cur = 0; save(); toast("Runde abgebrochen."); closeSheet();
   });
@@ -957,7 +991,7 @@ function renderTop() {
   document.querySelectorAll("#modeSw button").forEach(b => b.classList.toggle("on", b.dataset.mode === (S.mode || "single")));
   if (S.mode === "wahl" && !S.wahlOn) S.mode = "single";
   const wb = document.querySelector('#modeSw [data-mode="wahl"]'); wb.hidden = !S.wahlOn; 
-  $("#spinBtn").textContent = S.mode === "round" ? "Runde drehen!" : S.mode === "wahl" ? "Wahlrunde starten" : S.mode === "bingo" ? (bingoOn() && !bingoWinners().length ? "Bingo drehen!" : prizePending() ? "🍸 Bingo-Prämie" : "Neues Bingo starten") : "Drehen!";
+  $("#spinBtn").textContent = S.mode === "round" ? "Runde drehen!" : S.mode === "wahl" ? "Wahlrunde starten" : S.mode === "bingo" ? (bingoOn() && !bingoWinners().length ? "Bingo-Runde drehen!" : prizePending() ? "🍸 Bingo-Prämie" : "Neues Bingo starten") : "Drehen!";
   renderBingoMini();
   const p = player();
   const en = enabled();
@@ -970,8 +1004,8 @@ function renderTop() {
       : `Alle ${en.length} Drinks durch – nächster Dreh startet neu`;
     if (S.mode === "bingo") {
       const w = bingoOn() ? bingoWinners() : [];
-      $("#turnName").textContent = !bingoOn() ? "Drink-Bingo" : w.length ? `BINGO für ${w.map(q => q.name).join(" & ")}!` : `Bingo: ${p.name} ist dran`;
-      $("#turnLeft").textContent = !bingoOn() ? "Jeder bekommt eine Karte mit 9 Drinks" : w.length ? (prizePending() ? "Sieger wählt einen Cocktail, die anderen bewerten" : "Neues Spiel? Unten starten.") : `${bingoPool().length} Drinks im Bingo-Rad · Treffer auf deiner Karte zählen`;
+      $("#turnName").textContent = !bingoOn() ? "Drink-Bingo" : w.length ? `BINGO für ${w.map(q => q.name).join(" & ")}!` : `Bingo-Runde für alle ${S.players.length}`;
+      $("#turnLeft").textContent = !bingoOn() ? "Jeder bekommt eine Karte mit 9 Drinks" : w.length ? (prizePending() ? "Sieger wählt einen Cocktail, die anderen bewerten" : "Neues Spiel? Unten starten.") : `${bingoPool().length} Drinks im Bingo-Rad · jeder dreht, Treffer auf der eigenen Karte`;
     }
   }
 }
@@ -1059,6 +1093,7 @@ function openSheet(which) {
         <div class="grow"><input type="text" id="newName" placeholder="Neuer Name" autocomplete="off" enterkeyhint="done"></div>
         <button class="btn pri" type="submit">Hinzufügen</button>
       </form>
+      <p class="muted">Entfernen (Code nötig) löscht den Spieler samt seinen Drinks auf allen Handys im Raum und beim QR-Abgleich.</p>
       <p class="muted">Tipp: Antippen eines Namens oben wählt, wer dreht. Der gewählte Spieler bleibt, bis ihr oben jemand anderen antippt.</p>
       <div class="row"><div class="grow"><b>Alle Drinks zurücksetzen</b><div class="muted">Spieler bleiben, alle getrunkenen Drinks und der Verlauf werden gelöscht.</div></div>
         <button class="btn small warn" type="button" id="resetAll">Zurücksetzen</button></div>
@@ -1067,8 +1102,8 @@ function openSheet(which) {
       const p = S.players[+inp.dataset.rename]; p.name = inp.value.trim() || p.name; save(); renderTop();
     }));
     overlay.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => {
-      const i = +b.dataset.del; S.players.splice(i, 1);
-      if (S.cur >= S.players.length) S.cur = 0; save(); renderTop(); openSheet("players");
+      const p = S.players[+b.dataset.del]; if (!p) return;
+      askCode(b.closest(".row"), () => { removePlayer(p.id); renderTop(); openSheet("players"); toast(`${p.name} entfernt.`); });
     }));
     $("#addForm").addEventListener("submit", e => {
       e.preventDefault(); const n = $("#newName").value.trim(); if (!n) return;
@@ -1342,6 +1377,33 @@ function showResult(p, d, h, extra) {
   $("#rUndo").onclick = () => askCode($("#rUndo"), () => { takeBack(); closeSheet(); setTimeout(spin, 250); });
 }
 
+// Spieler entfernen: Grabstein in S.gone, damit ihn weder Raum- noch QR-Abgleich zurückholt.
+function removePlayer(pid) { S.gone = S.gone || {}; S.gone[pid] = Date.now(); applyGone(S); save(); }
+function applyGone(st) {
+  const g = st.gone || {}; if (!Object.keys(g).length) return;
+  const curId = st.players[st.cur] && st.players[st.cur].id;
+  st.players = st.players.filter(p => !g[p.id]);
+  st.history = st.history.filter(h => !g[h.pid]);
+  if (st.bingo) {
+    if (st.bingo.cards) for (const id in g) delete st.bingo.cards[id];
+    if (st.bingo.prize) { for (const id in g) delete st.bingo.prize[id]; Object.values(st.bingo.prize).forEach(pr => { if (pr && pr.r) for (const id in g) delete pr.r[id]; }); }
+  }
+  const ci = st.players.findIndex(p => p.id === curId); st.cur = ci >= 0 ? ci : 0;
+}
+// dasselbe für den geteilten Stand; Grabsteine aller Seiten werden vereinigt (auch wenn ein altes Handy sie weggelassen hat)
+function stripGone(o, sides) {
+  const g = Object.assign({}, ...sides.map(x => (x && x.gone) || {}), o.gone || {});
+  if (!Object.keys(g).length) return o;
+  o.gone = g;
+  for (const id in g) {
+    if (o.players) delete o.players[id]; if (o.seen) delete o.seen[id]; if (o.fav) delete o.fav[id];
+    if (o.bingo && o.bingo.cards) delete o.bingo.cards[id];
+    if (o.bingo && o.bingo.prize) { delete o.bingo.prize[id]; for (const pr of Object.values(o.bingo.prize)) if (pr && pr.r) delete pr.r[id]; }
+  }
+  for (const [k, h] of Object.entries(o.hist || {})) if (h && g[h.pid]) { delete o.hist[k]; if (o.rate) delete o.rate[k]; }
+  return o;
+}
+
 // Einträge löschen: raus aus Verlauf, Statistik und Bewertung; ist der Drink für den Spieler dann
 // gar nicht mehr im Verlauf, kommt auch der Haken weg (Drink ist wieder im Rad). Gilt im Raum für alle.
 function removeEntries(pred) {
@@ -1432,6 +1494,7 @@ function toShared(st) {
   o.set.ck = { inclOnly: !!st.ck.inclOnly, allowAf: !!st.ck.allowAf, cats: {} };
   for (const [k, v] of Object.entries(st.ck.cats)) o.set.ck.cats[k] = !!v;
   st.excluded.forEach(id => o.excl[fk(id)] = true);
+  if (st.gone && Object.keys(st.gone).length) o.gone = Object.assign({}, st.gone);
   if (st.bingo && st.bingo.id) o.bingo = { id: st.bingo.id, pool: st.bingo.pool, cards: Object.assign({}, st.bingo.cards), prize: JSON.parse(JSON.stringify(st.bingo.prize || {})) };
   return o;
 }
@@ -1455,6 +1518,8 @@ function fromShared(o, st) {
   }
   st.excluded = Object.keys(o.excl || {}).map(unfk);
   st.bingo = o.bingo && o.bingo.id ? { id: o.bingo.id, pool: o.bingo.pool || "", cards: Object.assign({}, o.bingo.cards), prize: JSON.parse(JSON.stringify(o.bingo.prize || {})) } : null;
+  st.gone = Object.assign({}, st.gone || {}, o.gone || {});
+  applyGone(st);
 }
 const isObj = v => v && typeof v === "object" && !Array.isArray(v);
 const same = (a, b) => stable(a) === stable(b);
@@ -1508,7 +1573,7 @@ async function syncNow() {
       const etag = useEtag && attempt < 3 ? g.headers.get("ETag") : null; // ohne ETag: einfach überschreiben (Abgleich ist trotzdem passiert)
       const remote = (await g.json()) || {};
       const local = toShared(S);
-      const merged = prune(merge3(SY.base, local, remote)) || {};
+      const merged = prune(stripGone(merge3(SY.base, local, remote), [local, remote])) || {};
       if (!same(merged, remote)) {
         const p = await fb("/data", { method: "PUT", headers: Object.assign({ "Content-Type": "application/json" }, etag ? { "if-match": etag } : {}), body: JSON.stringify(merged) });
         if (p.status === 412) continue; // jemand war schneller -> nochmal holen und zusammenführen
@@ -1818,7 +1883,8 @@ async function scanQr() {
 async function finishQr(data) {
   try {
     const remote = await unpackState(data);
-    const merged = prune(merge3(SY.code ? SY.base : {}, toShared(S), remote)) || {};
+    const local = toShared(S);
+    const merged = prune(stripGone(merge3(SY.code ? SY.base : {}, local, remote), [local, remote])) || {};
     fromShared(merged, S); fixManual();
     save(); render();
     $("#qrArea").innerHTML = `<p class="muted"><b style="color:var(--sea)">Abgeglichen!</b> Jetzt das andere Handy scannen lassen (hier auf <b>Zeigen</b> tippen), dann haben beide denselben Stand.</p>`;
@@ -1827,7 +1893,7 @@ async function finishQr(data) {
 }
 
 // ---------- Start ----------
-const APP_BUILD = "25.11.2026, 21:15 Uhr"; // deutsche Zeit des Updates
+const APP_BUILD = "27.11.2026, 10:00 Uhr"; // deutsche Zeit des Updates
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · " + APP_BUILD;
 if (fixManual()) save();
 render();
