@@ -512,7 +512,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "28"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "29"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -706,6 +706,7 @@ function rigTake(p, fixed) {
   const o = rgLoad(), id = (o.r || {})[p.id], d = id && BY_ID[id];
   if (!d) return null;
   if (fixed && !fixed.some(x => x.id === d.id)) return null; // Bingo/Straf-Rad: nur wenn der Drink dort drin ist, sonst bleibt die Vorgabe stehen
+  if (!enabled().some(x => x.id === d.id)) return null; // inzwischen weggefiltert: greift erst wieder, wenn der Filter ihn zulässt
   delete o.r[p.id]; rgSave(o);
   return d;
 }
@@ -723,12 +724,13 @@ function openRig() {
     return;
   }
   const r = o.r || {};
-  const groups = Object.keys(CATS).map(c => [c, DRINKS.filter(d => d.cat === c)]).filter(([, ds]) => ds.length);
+  const en = enabled(); // nur was beim normalen Drehen gerade aufs Rad kann (alle Filter + Karte)
+  const groups = Object.keys(CATS).map(c => [c, en.filter(d => d.cat === c)]).filter(([, ds]) => ds.length);
   // pro Spieler nur Drinks, die er noch nicht abgehakt hat (eine schon gesetzte Vorgabe bleibt sichtbar)
   const rq = () => norm((SQ.rig || "").trim()).split(/\s+/).filter(Boolean);
   const hit = d => { const w = rq(); return !w.length || w.every(x => norm(d.name + " " + d.ing + " " + CATS[d.cat]).includes(x)); };
   const opts = p => `<option value="">– normal drehen –</option>` + groups.map(([c, all]) => [c, all.filter(d => (!p.seen.includes(d.id) && hit(d)) || r[p.id] === d.id)]).filter(([, ds]) => ds.length).map(([c, ds]) => `<optgroup label="${esc(CATS[c])}">${ds.map(d => `<option value="${esc(d.id)}" ${r[p.id] === d.id ? "selected" : ""}>${esc(d.name)}${d.price ? " (" + esc(d.price) + ")" : ""}</option>`).join("")}</optgroup>`).join("");
-  sheet("🎬 Regie", `<p class="muted">Nur auf diesem Handy. Zur Auswahl stehen pro Spieler nur Drinks, die er noch nicht abgehakt hat. Das Rad dreht ganz normal und landet beim nächsten Dreh des Spielers auf dem Drink hier, egal ob Einzeln, Runde oder Bingo. Danach ist die Vorgabe automatisch weg. Beim Bingo greift sie nur, wenn der Drink im Bingo-Rad ist.</p>
+  sheet("🎬 Regie", `<p class="muted">Nur auf diesem Handy. Zur Auswahl stehen pro Spieler nur Drinks, die er noch nicht abgehakt hat und die laut Filter gerade aufs Rad können. Das Rad dreht ganz normal und landet beim nächsten Dreh des Spielers auf dem Drink hier, egal ob Einzeln, Runde oder Bingo. Danach ist die Vorgabe automatisch weg. Beim Bingo greift sie nur, wenn der Drink im Bingo-Rad ist.</p>
     ${searchBox("rig", "Drink suchen, dann unten auswählen …")}
     ${S.players.map(p => `<label class="wahlrow"><b>${esc(p.name)}</b><select data-rg="${esc(p.id)}">${opts(p)}</select></label>`).join("")}
     <div class="actions" style="margin-top:14px"><button class="btn warn" type="button" id="rgClear">Alle löschen</button><button class="btn pri" type="button" id="rgDone">Fertig</button></div>`);
@@ -2010,7 +2012,7 @@ async function finishQr(data) {
 }
 
 // ---------- Start ----------
-const APP_BUILD = "27.11.2026, 22:00 Uhr"; // deutsche Zeit des Updates
+const APP_BUILD = "27.11.2026, 22:05 Uhr"; // deutsche Zeit des Updates
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · " + APP_BUILD;
 if (fixManual()) save();
 render();
