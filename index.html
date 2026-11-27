@@ -106,6 +106,7 @@ h1 span { color: var(--coral); }
 .pointer {
   position: absolute; left: 50%; top: -18px; transform: translateX(-50%); width: 34px; height: 44px; z-index: 2;
   filter: drop-shadow(0 4px 4px rgba(0,0,0,.4));
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none;
 }
 .hub {
   position: absolute; inset: 0; margin: auto; width: 23%; height: 23%; border-radius: 50%;
@@ -510,7 +511,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "25"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "26"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -624,7 +625,7 @@ function spinFor(p, dur, rid, fixed, bg, ext) {
   return new Promise(resolve => {
     const pool = fixed || prepPool(p);
     if (!pool) { resolve(null); return; }
-    const winner = pool[Math.floor(Math.random() * pool.length)];
+    const winner = rigTake(p, fixed) || pool[Math.floor(Math.random() * pool.length)];
     if (!segs.some(d => d.id === winner.id) || segs.length === 0) refillSegsWith(winner, pool);
     const w = segs.findIndex(d => d.id === winner.id);
     const n = segs.length, a = Math.PI * 2 / n;
@@ -691,6 +692,63 @@ async function spinRound() {
   showOrder(rid);
   disq(got);
 }
+// ---------- Regie (geheim): Christoph legt für den nächsten Dreh einzelner Spieler den Drink fest ----------
+// Zugang: den gelben Zeiger über dem Rad ca. 1 Sekunde gedrückt halten, dann eigene Geheim-PIN.
+// Alles bleibt nur auf diesem Handy (eigener Speicher, kein Raum-Abgleich, kein QR). Das Rad dreht ganz normal
+// und landet dann auf dem vorgegebenen Drink. Nach dem Dreh ist die Vorgabe automatisch weg.
+const RGKEY = KEY + "-rg";
+const rgLoad = () => { try { return JSON.parse(localStorage.getItem(RGKEY)) || {}; } catch (e) { return {}; } };
+const rgSave = o => { try { localStorage.setItem(RGKEY, JSON.stringify(o)); } catch (e) {} };
+let rgOpen = false; // PIN gilt, bis die App geschlossen wird
+function rigTake(p, fixed) {
+  if (!p || p.guest || DEMO) return null;
+  const o = rgLoad(), id = (o.r || {})[p.id], d = id && BY_ID[id];
+  if (!d) return null;
+  if (fixed && !fixed.some(x => x.id === d.id)) return null; // Bingo/Straf-Rad: nur wenn der Drink dort drin ist, sonst bleibt die Vorgabe stehen
+  delete o.r[p.id]; rgSave(o);
+  return d;
+}
+function openRig() {
+  if (spinning) return;
+  const o = rgLoad();
+  if (!rgOpen) {
+    const neu = !o.pin;
+    sheet("Einstellungen", `<form class="row" id="rgForm" style="border:0"><div class="grow"><input type="password" id="rgPin" inputmode="numeric" placeholder="${neu ? "Neue Geheim-PIN festlegen (4–8 Ziffern)" : "PIN"}" autocomplete="off" maxlength="8"></div><button class="btn pri" type="submit">OK</button></form>
+      ${neu ? `<p class="muted">Diese PIN gibt es nur auf diesem Handy. Gut merken, und nicht 0000 nehmen, die kennen alle.</p>` : ""}`);
+    setTimeout(() => $("#rgPin").focus(), 50);
+    $("#rgForm").onsubmit = e => {
+      e.preventDefault(); const v = $("#rgPin").value.trim();
+      if (neu) { if (!/^\d{4,8}$/.test(v) || v === "0000") { toast("Bitte 4–8 Ziffern, nicht 0000."); return; } o.pin = v; rgSave(o); rgOpen = true; openRig(); }
+      else if (v === o.pin) { rgOpen = true; openRig(); }
+      else { closeSheet(); } // falsche PIN: einfach zu, nichts verraten
+    };
+    return;
+  }
+  const r = o.r || {};
+  const groups = Object.keys(CATS).map(c => [c, DRINKS.filter(d => d.cat === c)]).filter(([, ds]) => ds.length);
+  const opts = p => `<option value="">– normal drehen –</option>` + groups.map(([c, ds]) => `<optgroup label="${esc(CATS[c])}">${ds.map(d => `<option value="${esc(d.id)}" ${r[p.id] === d.id ? "selected" : ""}>${esc(d.name)}${d.price ? " (" + esc(d.price) + ")" : ""}</option>`).join("")}</optgroup>`).join("");
+  sheet("🎬 Regie", `<p class="muted">Nur auf diesem Handy. Das Rad dreht ganz normal und landet beim nächsten Dreh des Spielers auf dem Drink hier, egal ob Einzeln, Runde oder Bingo. Danach ist die Vorgabe automatisch weg. Beim Bingo greift sie nur, wenn der Drink im Bingo-Rad ist.</p>
+    ${S.players.map(p => `<label class="wahlrow"><b>${esc(p.name)}</b><select data-rg="${esc(p.id)}">${opts(p)}</select></label>`).join("")}
+    <div class="actions" style="margin-top:14px"><button class="btn warn" type="button" id="rgClear">Alle löschen</button><button class="btn pri" type="button" id="rgDone">Fertig</button></div>`);
+  overlay.querySelectorAll("[data-rg]").forEach(sel => sel.onchange = () => {
+    const x = rgLoad(); x.r = x.r || {};
+    if (sel.value) x.r[sel.dataset.rg] = sel.value; else delete x.r[sel.dataset.rg];
+    rgSave(x);
+  });
+  $("#rgClear").onclick = () => { const x = rgLoad(); x.r = {}; rgSave(x); openRig(); };
+  $("#rgDone").onclick = closeSheet;
+}
+(() => {
+  const ptr = document.querySelector(".pointer"); if (!ptr) return;
+  let t = 0;
+  const start = e => { clearTimeout(t); t = setTimeout(() => { if (navigator.vibrate) navigator.vibrate(30); openRig(); }, 900); };
+  const stop = () => clearTimeout(t);
+  ptr.addEventListener("touchstart", start, { passive: true });
+  ptr.addEventListener("mousedown", start);
+  ["touchend", "touchcancel", "touchmove", "mouseup", "mouseleave"].forEach(ev => ptr.addEventListener(ev, stop));
+  ptr.addEventListener("contextmenu", e => e.preventDefault());
+})();
+
 // ---------- Gasttrinker: einmal spontan drehen, zählt nirgends ----------
 const GKEY = KEY + "-gast";
 function openGuest() {
@@ -1913,7 +1971,7 @@ async function finishQr(data) {
 }
 
 // ---------- Start ----------
-const APP_BUILD = "27.11.2026, 21:40 Uhr"; // deutsche Zeit des Updates
+const APP_BUILD = "27.11.2026, 21:55 Uhr"; // deutsche Zeit des Updates
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · " + APP_BUILD;
 if (fixManual()) save();
 render();
