@@ -514,7 +514,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "32"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "33"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -807,19 +807,19 @@ function showGuestResult(g, d) {
   $("#gAgain").onclick = () => askCode($("#gAgain"), () => { overlay.innerHTML = ""; spinGuest(g.name); });
 }
 document.addEventListener("click", e => { if (e.target.closest("#guestBtn")) openGuest(); });
-document.addEventListener("click", e => { if (e.target.closest("#bingoBtn")) { if (!bingoOn()) newBingo(); openBingo(); } });
+document.addEventListener("click", e => { if (e.target.closest("#bingoBtn")) openBingo(); });
 
-// ---------- Drink-Bingo im Hintergrund: läuft bei jedem normalen Dreh mit, ohne extra Bingo-Drehen ----------
-// Jeder hat eine 3x3-Karte mit 9 einzelnen Drinks aus dem aktuellen Rad (laut Filter, die er noch nicht hatte).
-// Jeder gedrehte Drink (Einzeln, Runde, Wahlrunde) hakt das Feld ab, wenn er auf der eigenen Karte steht.
-// Optionaler Bonus: mit BG_BOOST Wahrscheinlichkeit landet das Rad auf einem offenen Karten-Drink.
-// Aktuell aus (0), Bingo dauert dann meist rund 40 Runden.
-// Wer eine Reihe hat, gewinnt; dann ist das Bingo eingefroren, bis die Prämie durch ist, danach startet ein neues.
-// S.bingo = { id, v: 3, start, won, pool: "drink|drink|…" (Rad beim Start), cards: { pid: "9 Drinks" }, prize }
-// Treffer werden aus dem Verlauf abgeleitet (Einträge ab start bis won, ohne Abhaken-Einträge und Straf-Drinks).
+// ---------- Drink-Bingo im Hintergrund, in nummerierten Bingo-Runden ----------
+// Jeder hat eine 3x3-Karte mit 9 einzelnen Drinks aus dem Rad (laut Filter). Jeder Drink, den ein Spieler in der
+// laufenden Bingo-Runde getrunken hat (gedreht, Wahlrunde oder abgehakt), hakt das Feld ab, wenn er auf seiner Karte steht.
+// Runde 1 umfasst den ganzen bisherigen Verlauf (start 0) und ist auf allen Handys gleich (feste ID, feste Karten).
+// Eine Bingo-Runde kann über Tage gehen; eine neue startet nur per Knopf mit Code und zweiter Bestätigung.
+// Wer eine Reihe hat, gewinnt; danach ist die Runde eingefroren (won), bis jemand bewusst eine neue startet.
+// S.bingo = { id, v: 4, n (Rundennummer), start, won, pool: "drink|…" (Rad beim Start), cards: { pid: "9 Drinks" }, prize }
+// Optionaler Bonus beim Drehen (BG_BOOST) ist aus.
 const BG_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 const BG_BOOST = 0; // Christoph 27.11.: ohne Bonus, das Rad dreht rein zufällig
-const bingoOn = () => !!(S.bingo && S.bingo.id && S.bingo.pool && S.bingo.v === 3);
+const bingoOn = () => !!(S.bingo && S.bingo.id && S.bingo.pool && S.bingo.v === 4);
 // Karte hängt nur von Bingo-ID + Spieler-ID ab: jedes Handy erzeugt für denselben Spieler dieselbe Karte.
 function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 function seededShuffle(a, seed) {
@@ -829,8 +829,7 @@ function seededShuffle(a, seed) {
   return a;
 }
 function makeCard(p) {
-  const all = S.bingo.pool.split("|").filter(id => BY_ID[id]), open = all.filter(id => !p.seen.includes(id));
-  return seededShuffle((open.length >= 9 ? open : all).sort(), S.bingo.id + "|" + p.id).slice(0, 9).join("|");
+  return seededShuffle(S.bingo.pool.split("|").filter(id => BY_ID[id]).sort(), S.bingo.id + "|" + p.id).slice(0, 9).join("|");
 }
 function bingoCard(p) {
   if (!bingoOn()) return [];
@@ -838,8 +837,8 @@ function bingoCard(p) {
   if (!S.bingo.cards[p.id]) S.bingo.cards[p.id] = makeCard(p); // Spieler kam später dazu
   return S.bingo.cards[p.id].split("|");
 }
-const bingoEntries = (p, before) => !bingoOn() ? [] : S.history.filter(h => h.pid === p.id && BY_ID[h.id] && !h.m && !h.bp
-  && h.t >= S.bingo.start && (!S.bingo.won || h.t <= S.bingo.won) && (before == null || h.t < before));
+const bingoEntries = (p, before) => !bingoOn() ? [] : S.history.filter(h => h.pid === p.id && BY_ID[h.id]
+  && h.t >= (S.bingo.start || 0) && (!S.bingo.won || h.t <= S.bingo.won) && (before == null || h.t < before));
 const bingoHits = (p, before) => { const c = bingoCard(p); return new Set(bingoEntries(p, before).map(h => h.id).filter(id => c.includes(id))); };
 const bingoCount = p => bingoHits(p).size;
 function bingoLines(p) { const c = bingoCard(p), hit = bingoHits(p); return BG_LINES.filter(l => l.every(i => hit.has(c[i]))); }
@@ -855,18 +854,31 @@ function bingoBoost(p, pool) {
   const cand = bingoCard(p).filter(id => !hit.has(id) && ids.has(id));
   return cand.length ? BY_ID[cand[Math.floor(Math.random() * cand.length)]] : null;
 }
-function newBingo(quiet) {
+// Runde 1 entsteht von selbst und ist auf jedem Handy identisch (kein Abgleich-Konflikt).
+function ensureBingo() {
+  if (bingoOn()) { bingoCheckWon(); return; }
+  const en = enabled(); if (en.length < 9) return;
+  S.bingo = { id: "r1", v: 4, n: 1, start: 0, pool: en.map(d => d.id).sort().join("|"), cards: {} };
+  S.players.forEach(p => S.bingo.cards[p.id] = makeCard(p));
+}
+function newBingo() {
   const en = enabled();
-  if (en.length < 9) { if (!quiet) toast("Für Bingo braucht der Filter mindestens 9 Drinks."); return false; }
-  S.bingo = { id: "b" + Date.now().toString(36), v: 3, start: Date.now(), pool: en.map(d => d.id).join("|"), cards: {} };
+  if (en.length < 9) { toast("Für Bingo braucht der Filter mindestens 9 Drinks."); return false; }
+  const n = ((bingoOn() && S.bingo.n) || 1) + 1;
+  S.bingo = { id: "r" + n + "-" + Date.now().toString(36), v: 4, n, start: Date.now(), pool: en.map(d => d.id).sort().join("|"), cards: {} };
   S.players.forEach(p => S.bingo.cards[p.id] = makeCard(p));
   save(); render();
   return true;
 }
-// Vor jedem Dreh: läuft kein Bingo oder ist das letzte samt Prämie fertig, startet still ein neues.
-function ensureBingo() {
-  bingoCheckWon();
-  if (!bingoOn() || (S.bingo.won && !prizePending())) { if (newBingo(true)) toast("Neues Bingo läuft mit! Karten unter dem Rad."); }
+// Neue Bingo-Runde: Code 0000 und danach nochmal ausdrücklich bestätigen
+function restartBingo(anchor, after) {
+  askCode(anchor, () => {
+    const n = ((bingoOn() && S.bingo.n) || 1) + 1;
+    const box = anchor.closest(".actions") || anchor;
+    const old = document.getElementById("bgConfirm"); if (old) old.remove();
+    box.insertAdjacentHTML("afterend", `<div class="row" id="bgConfirm"><div class="grow"><b>Wirklich Bingo-Runde ${n} starten?</b><div class="muted">Alle bekommen neue Karten, ab jetzt zählt nur noch, was ab jetzt getrunken wird. Das lässt sich nicht rückgängig machen.</div></div><button class="btn small warn" type="button" id="bgYes">Ja, neue Runde</button></div>`);
+    $("#bgYes").onclick = () => { if (newBingo()) { toast(`Bingo-Runde ${n} läuft!`); (after || openBingo)(); } };
+  });
 }
 // Sieger weg (z. B. Runde abgebrochen)? Dann wieder auftauen.
 function bingoCheckWon() { if (bingoOn() && S.bingo.won && !bingoWinners().length) { delete S.bingo.won; save(); } }
@@ -877,32 +889,31 @@ function bingoAfter(entries) {
   if (fresh) { S.bingo.won = Date.now(); save(); setTimeout(confetti, 700); }
   const w = bingoWinners();
   const rows = entries.map(h => { const p = S.players.find(q => q.id === h.pid); if (!p || !BY_ID[h.id]) return "";
-    const now = bingoCard(p).includes(h.id) && !bingoHits(p, h.t).has(h.id) && h.t >= S.bingo.start;
+    const now = bingoCard(p).includes(h.id) && !bingoHits(p, h.t).has(h.id) && h.t >= (S.bingo.start || 0);
     return `<div class="row"><div class="grow"><b>${esc(p.name)}</b> · ${esc(BY_ID[h.id].name)}<div class="muted">${now ? `<b style="color:var(--sea)">✓ Bingo-Treffer!</b>` : "nicht auf der Bingo-Karte"}</div></div><span class="muted" style="font-variant-numeric:tabular-nums">${bingoCount(p)}/9</span></div>`; }).join("");
   const big = w.length && S.bingo.won ? `<div class="bgbig">BINGO!</div><p style="text-align:center"><b>${esc(w.map(q => q.name).join(" & "))}</b> ${w.length > 1 ? "haben" : "hat"} eine volle Reihe. Die anderen trinken auf ${w.length > 1 ? "die Sieger" : "den Sieger"}!</p>` : "";
-  return `<div class="cathead">Bingo</div>${big}${rows}`;
+  return `<div class="cathead">Bingo · Runde ${S.bingo.n || 1}</div>${big}${rows}`;
 }
 function renderBingoMini() {
   const el = $("#bingoMini"); if (!el) return;
   const p = player();
   if (!p) { el.innerHTML = ""; return; }
-  if (!bingoOn()) { el.innerHTML = `<div class="bgmini"><div class="bghead"><b>🎯 Drink-Bingo</b><button class="btn small pri" type="button" id="bgStart">Starten</button></div><p class="muted" style="margin:6px 0 0">Läuft bei jedem normalen Dreh mit.</p></div>`; $("#bgStart").onclick = () => { if (newBingo()) toast("Bingo läuft! Jeder hat eine Karte."); }; return; }
+  ensureBingo();
+  if (!bingoOn()) { el.innerHTML = ""; return; }
   const w = bingoWinners(), q = w[0] || p;
-  el.innerHTML = `<div class="bgmini"><div class="bghead"><b>${w.length ? "🏆 " : "🎯 "}Bingo ${esc(q.name)} <span class="muted">${bingoCount(q)}/9</span></b><span style="display:flex;gap:6px;flex:0 0 auto">${w.length && prizePending() ? `<button class="btn small pri" type="button" id="bgPrize">🍸 Prämie</button> ` : ""}<button class="btn small" type="button" id="bgAll">Alle Karten</button></span></div>${bingoGrid(q)}</div>`;
+  el.innerHTML = `<div class="bgmini"><div class="bghead"><b>${w.length ? "🏆 " : "🎯 "}Bingo R${S.bingo.n || 1} · ${esc(q.name)} <span class="muted">${bingoCount(q)}/9</span></b><span style="display:flex;gap:6px;flex:0 0 auto">${w.length && prizePending() ? `<button class="btn small pri" type="button" id="bgPrize">🍸 Prämie</button> ` : ""}<button class="btn small" type="button" id="bgAll">Alle Karten</button></span></div>${bingoGrid(q)}</div>`;
   $("#bgAll").onclick = openBingo;
   if ($("#bgPrize")) $("#bgPrize").onclick = openPrize;
 }
 function openBingo() {
-  if (!bingoOn()) { sheet("Drink-Bingo", `<p class="muted">Bingo startet automatisch mit dem nächsten Dreh.</p>`); return; }
+  ensureBingo();
+  if (!bingoOn()) { sheet("Drink-Bingo", `<p class="muted">Für Bingo braucht der Filter mindestens 9 Drinks.</p>`); return; }
   const w = bingoWinners();
-  sheet("Drink-Bingo", `<p class="muted">Bingo läuft im Hintergrund mit, ihr dreht ganz normal (Einzeln, Runde oder Wahlrunde). Jeder hat 9 Drinks aus dem aktuellen Rad auf seiner Karte. Landet dein Dreh auf einem davon, wird das Feld abgehakt. Das Rad dreht ganz normal zufällig, ein Bingo kann also auch mal über mehrere Abende laufen. Abhaken in der Liste und Straf-Drinks zählen nicht. Wer zuerst eine Reihe hat (waagrecht, senkrecht oder diagonal), gewinnt; in einer Runde wird erst am Ende gewertet. Nach der Prämie startet mit dem nächsten Dreh ein neues Bingo.</p>
+  sheet(`Drink-Bingo · Runde ${S.bingo.n || 1}`, `<p class="muted">${S.bingo.start ? `Läuft seit ${new Date(S.bingo.start).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} Uhr. ` : "Zählt alles, was ihr bisher getrunken habt. "}Bingo läuft im Hintergrund mit, ihr dreht ganz normal. Jeder hat 9 Drinks aus dem Rad auf seiner Karte. Jeder Drink, den du in dieser Bingo-Runde trinkst (gedreht, Wahlrunde oder abgehakt), hakt das Feld ab, wenn er auf deiner Karte steht. Wer zuerst eine Reihe hat (waagrecht, senkrecht oder diagonal), gewinnt. Eine Bingo-Runde kann über mehrere Tage gehen; eine neue startet nur über den Knopf unten, mit Code und zweiter Bestätigung.</p>
     ${w.length ? `<div class="bgbig">BINGO!</div><p style="text-align:center"><b>${esc(w.map(q => q.name).join(" & "))}</b> gewinnt.</p>${prizePending() ? `<div class="actions" style="grid-template-columns:1fr"><button class="btn pri" type="button" id="bgPrizeB">🍸 Bingo-Prämie: Cocktail &amp; Bewertung</button></div>` : ""}` : ""}
     ${S.players.map(p => `<div class="bgcard"><h3>${w.includes(p) ? "🏆 " : ""}${esc(p.name)} <span class="muted">· ${bingoCount(p)} / 9</span></h3>${bingoGrid(p)}</div>`).join("")}
-    <div class="row"><div class="grow"><b>Neues Bingo</b><div class="muted">Neue Karten für alle${w.length && !prizePending() ? "" : " (mit Code)"}.</div></div><button class="btn small pri" type="button" id="bgNew">Neu starten</button></div>`);
-  $("#bgNew").onclick = () => {
-    const go = () => { if (newBingo()) { toast("Neues Bingo!"); openBingo(); } };
-    if (w.length && !prizePending()) go(); else askCode($("#bgNew"), go);
-  };
+    <div class="row" id="bgNewRow"><div class="grow"><b>Neue Bingo-Runde ${(S.bingo.n || 1) + 1}</b><div class="muted">Neue Karten für alle, mit Code und zweiter Bestätigung.</div></div><button class="btn small warn" type="button" id="bgNew">Neu starten</button></div>`);
+  $("#bgNew").onclick = () => restartBingo($("#bgNewRow"));
   if ($("#bgPrizeB")) $("#bgPrizeB").onclick = openPrize;
 }
 
@@ -971,7 +982,7 @@ function openPrize() {
   const sh = overlay.querySelector("#prizeBox") && overlay.querySelector(".sheet"), y = sh ? sh.scrollTop : 0;
   sheet("Bingo-Prämie", `<div id="prizeBox"><p class="muted">Wer Bingo hat, sucht einen Cocktail aus, die anderen bewerten ihn ehrlich. Ø über 3 oder genau 3: nichts passiert. Ø unter 3: Straf-Dreh nur aus Drinks mit Ø unter 3 Sternen, und den Drink bekommt nur der Bingo-Sieger.</p>
     ${w.map(prizeHTML).join("")}
-    ${prizePending() ? "" : `<div class="actions" style="grid-template-columns:1fr"><button class="btn pri" type="button" id="prNew">Neues Bingo starten</button></div>`}</div>`);
+    ${prizePending() ? "" : `<div class="actions" style="grid-template-columns:1fr"><button class="btn pri" type="button" id="prNew">Neue Bingo-Runde starten</button></div>`}</div>`);
   const sh2 = overlay.querySelector(".sheet"); if (sh2) sh2.scrollTop = y;
   const box = $("#prizeBox"), getW = id => S.players.find(p => p.id === id);
   const setPrize = (wid, v) => { S.bingo.prize = S.bingo.prize || {}; if (v) S.bingo.prize[wid] = v; else delete S.bingo.prize[wid]; save(); renderTop(); openPrize(); };
@@ -986,7 +997,7 @@ function openPrize() {
     delete (pr.r || {})[rid]; setPrize(wid, pr);
   });
   box.querySelectorAll("[data-ppen]").forEach(b => b.onclick = () => { const q = getW(b.dataset.ppen); if (q) { overlay.innerHTML = ""; spinPenalty(q); } });
-  if ($("#prNew")) $("#prNew").onclick = () => { if (newBingo()) { toast("Neues Bingo! Jeder hat eine frische Karte."); openBingo(); } };
+  if ($("#prNew")) $("#prNew").onclick = () => restartBingo($("#prNew"));
 }
 async function spinPenalty(w) {
   if (spinning || !bingoOn() || penaltyEntry(w)) return;
@@ -1014,7 +1025,7 @@ function showOrder(rid) {
   hs.forEach(h => (groups[h.id] = groups[h.id] || []).push(pmap[h.pid] || "?"));
   const total = Object.values(groups).reduce((s, g) => s + g.length, 0);
   const paid = hs.filter(h => BY_ID[h.id].price);
-  const isBg = bingoOn() && hs.some(h => h.t >= S.bingo.start);
+  const isBg = bingoOn() && hs.some(h => h.t >= (S.bingo.start || 0));
   overlay.innerHTML = `<div class="scrim"><div class="sheet" role="dialog" aria-label="Bestellung">
     <h2>Bestellung für die Bar<button class="x" type="button" aria-label="Schließen" id="closeX">✕</button></h2>
     <p class="muted">${total} Drinks · zum Vorzeigen am Tresen</p>
@@ -1414,6 +1425,7 @@ function openSheet(which) {
         if (!p.seen.includes(id)) p.seen.push(id);
         if (!S.history.some(h => h.pid === p.id && h.id === id)) S.history.unshift({ pid: p.id, id, t: Date.now(), m: 1 }); // zählt in Statistik, bewertbar
         disq([{ p, d: BY_ID[id] }]);
+        if (bingoOn() && bingoCard(p).includes(id)) { const wasWon = !!S.bingo.won; bingoAfter([]); toast(S.bingo.won && !wasWon ? `BINGO für ${bingoWinners().map(q => q.name).join(" & ")}!` : `Bingo-Treffer für ${p.name}!`); }
       } else {
         // Haken weg = nicht getrunken (löscht Einträge) -> nur mit Code
         cb.checked = true;
@@ -1616,7 +1628,7 @@ function toShared(st) {
   for (const [k, v] of Object.entries(st.ck.cats)) o.set.ck.cats[k] = !!v;
   st.excluded.forEach(id => o.excl[fk(id)] = true);
   if (st.gone && Object.keys(st.gone).length) o.gone = Object.assign({}, st.gone);
-  if (st.bingo && st.bingo.id) o.bingo = Object.assign({ id: st.bingo.id, pool: st.bingo.pool, cards: Object.assign({}, st.bingo.cards), prize: JSON.parse(JSON.stringify(st.bingo.prize || {})) }, st.bingo.v ? { v: st.bingo.v } : {}, st.bingo.start ? { start: st.bingo.start } : {}, st.bingo.won ? { won: st.bingo.won } : {});
+  if (st.bingo && st.bingo.id) o.bingo = Object.assign({ id: st.bingo.id, pool: st.bingo.pool, cards: Object.assign({}, st.bingo.cards), prize: JSON.parse(JSON.stringify(st.bingo.prize || {})) }, st.bingo.v ? { v: st.bingo.v } : {}, st.bingo.n ? { n: st.bingo.n } : {}, st.bingo.start ? { start: st.bingo.start } : {}, st.bingo.won ? { won: st.bingo.won } : {});
   return o;
 }
 function fromShared(o, st) {
@@ -1638,7 +1650,7 @@ function fromShared(o, st) {
     for (const [k, v] of Object.entries(set.ck.cats || {})) if (k in st.ck.cats) st.ck.cats[k] = !!v;
   }
   st.excluded = Object.keys(o.excl || {}).map(unfk);
-  st.bingo = o.bingo && o.bingo.id ? Object.assign({ id: o.bingo.id, pool: o.bingo.pool || "", cards: Object.assign({}, o.bingo.cards), prize: JSON.parse(JSON.stringify(o.bingo.prize || {})) }, o.bingo.v ? { v: o.bingo.v } : {}, o.bingo.start ? { start: o.bingo.start } : {}, o.bingo.won ? { won: o.bingo.won } : {}) : null;
+  st.bingo = o.bingo && o.bingo.id ? Object.assign({ id: o.bingo.id, pool: o.bingo.pool || "", cards: Object.assign({}, o.bingo.cards), prize: JSON.parse(JSON.stringify(o.bingo.prize || {})) }, o.bingo.v ? { v: o.bingo.v } : {}, o.bingo.n ? { n: o.bingo.n } : {}, o.bingo.start ? { start: o.bingo.start } : { start: 0 }, o.bingo.won ? { won: o.bingo.won } : {}) : null;
   st.gone = Object.assign({}, st.gone || {}, o.gone || {});
   applyGone(st);
 }
@@ -2014,7 +2026,7 @@ async function finishQr(data) {
 }
 
 // ---------- Start ----------
-const APP_BUILD = "27.11.2026, 23:20 Uhr"; // deutsche Zeit des Updates
+const APP_BUILD = "27.11.2026, 23:30 Uhr"; // deutsche Zeit des Updates
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · " + APP_BUILD;
 if (fixManual()) save();
 render();
