@@ -693,7 +693,7 @@ async function spinRound() {
   disq(got);
 }
 // ---------- Regie (geheim): Christoph legt für den nächsten Dreh einzelner Spieler den Drink fest ----------
-// Zugang: den gelben Zeiger über dem Rad ca. 1 Sekunde gedrückt halten, dann eigene Geheim-PIN.
+// Zugang: den gelben Zeiger über dem Rad ca. 1 Sekunde gedrückt halten, dann PIN 0000 (Wunsch von Christoph).
 // Alles bleibt nur auf diesem Handy (eigener Speicher, kein Raum-Abgleich, kein QR). Das Rad dreht ganz normal
 // und landet dann auf dem vorgegebenen Drink. Nach dem Dreh ist die Vorgabe automatisch weg.
 const RGKEY = KEY + "-rg";
@@ -712,15 +712,12 @@ function openRig() {
   if (spinning) return;
   const o = rgLoad();
   if (!rgOpen) {
-    const neu = !o.pin;
-    sheet("Einstellungen", `<form class="row" id="rgForm" style="border:0"><div class="grow"><input type="password" id="rgPin" inputmode="numeric" placeholder="${neu ? "Neue Geheim-PIN festlegen (4–8 Ziffern)" : "PIN"}" autocomplete="off" maxlength="8"></div><button class="btn pri" type="submit">OK</button></form>
-      ${neu ? `<p class="muted">Diese PIN gibt es nur auf diesem Handy. Gut merken, und nicht 0000 nehmen, die kennen alle.</p>` : ""}`);
+    sheet("Einstellungen", `<form class="row" id="rgForm" style="border:0"><div class="grow"><input type="password" id="rgPin" inputmode="numeric" placeholder="PIN" autocomplete="off" maxlength="8"></div><button class="btn pri" type="submit">OK</button></form>`);
     setTimeout(() => $("#rgPin").focus(), 50);
     $("#rgForm").onsubmit = e => {
-      e.preventDefault(); const v = $("#rgPin").value.trim();
-      if (neu) { if (!/^\d{4,8}$/.test(v) || v === "0000") { toast("Bitte 4–8 Ziffern, nicht 0000."); return; } o.pin = v; rgSave(o); rgOpen = true; openRig(); }
-      else if (v === o.pin) { rgOpen = true; openRig(); }
-      else { closeSheet(); } // falsche PIN: einfach zu, nichts verraten
+      e.preventDefault();
+      if ($("#rgPin").value.trim() === "0000") { rgOpen = true; openRig(); }
+      else closeSheet(); // falsche PIN: einfach zu, nichts verraten
     };
     return;
   }
