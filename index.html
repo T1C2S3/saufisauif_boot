@@ -103,6 +103,7 @@ h1 span { color: var(--coral); }
 .stage { position: relative; display: grid; place-items: center; padding-top: 14px; }
 .wheel-wrap { position: relative; width: min(88vw, 400px); aspect-ratio: 1; max-width: 100%; }
 #wheel { width: 100%; height: 100%; display: block; border-radius: 50%; box-shadow: 0 0 0 6px var(--deck-2), 0 0 0 9px var(--gold), 0 20px 50px rgba(0,0,0,.5); touch-action: manipulation; }
+.lsearch { width: 100%; margin: 6px 0 4px; position: sticky; top: 0; z-index: 3; -webkit-appearance: none; appearance: none; font-size: 16px !important; }
 .pointer {
   position: absolute; left: 50%; top: -18px; transform: translateX(-50%); width: 34px; height: 44px; z-index: 2;
   filter: drop-shadow(0 4px 4px rgba(0,0,0,.4));
@@ -197,7 +198,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--sea); outli
 .row:last-child { border-bottom: 0; }
 .row .grow { flex: 1; min-width: 0; }
 .muted { color: var(--mist); font-size: .85rem; }
-input[type=text], input[type=password] {
+input[type=text], input[type=password], input[type=search] {
   width: 100%; font: 600 1rem var(--body); color: var(--foam); background: var(--night);
   border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 12px;
 }
@@ -511,7 +512,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "27"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "28"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -724,8 +725,11 @@ function openRig() {
   const r = o.r || {};
   const groups = Object.keys(CATS).map(c => [c, DRINKS.filter(d => d.cat === c)]).filter(([, ds]) => ds.length);
   // pro Spieler nur Drinks, die er noch nicht abgehakt hat (eine schon gesetzte Vorgabe bleibt sichtbar)
-  const opts = p => `<option value="">– normal drehen –</option>` + groups.map(([c, all]) => [c, all.filter(d => !p.seen.includes(d.id) || r[p.id] === d.id)]).filter(([, ds]) => ds.length).map(([c, ds]) => `<optgroup label="${esc(CATS[c])}">${ds.map(d => `<option value="${esc(d.id)}" ${r[p.id] === d.id ? "selected" : ""}>${esc(d.name)}${d.price ? " (" + esc(d.price) + ")" : ""}</option>`).join("")}</optgroup>`).join("");
+  const rq = () => norm((SQ.rig || "").trim()).split(/\s+/).filter(Boolean);
+  const hit = d => { const w = rq(); return !w.length || w.every(x => norm(d.name + " " + d.ing + " " + CATS[d.cat]).includes(x)); };
+  const opts = p => `<option value="">– normal drehen –</option>` + groups.map(([c, all]) => [c, all.filter(d => (!p.seen.includes(d.id) && hit(d)) || r[p.id] === d.id)]).filter(([, ds]) => ds.length).map(([c, ds]) => `<optgroup label="${esc(CATS[c])}">${ds.map(d => `<option value="${esc(d.id)}" ${r[p.id] === d.id ? "selected" : ""}>${esc(d.name)}${d.price ? " (" + esc(d.price) + ")" : ""}</option>`).join("")}</optgroup>`).join("");
   sheet("🎬 Regie", `<p class="muted">Nur auf diesem Handy. Zur Auswahl stehen pro Spieler nur Drinks, die er noch nicht abgehakt hat. Das Rad dreht ganz normal und landet beim nächsten Dreh des Spielers auf dem Drink hier, egal ob Einzeln, Runde oder Bingo. Danach ist die Vorgabe automatisch weg. Beim Bingo greift sie nur, wenn der Drink im Bingo-Rad ist.</p>
+    ${searchBox("rig", "Drink suchen, dann unten auswählen …")}
     ${S.players.map(p => `<label class="wahlrow"><b>${esc(p.name)}</b><select data-rg="${esc(p.id)}">${opts(p)}</select></label>`).join("")}
     <div class="actions" style="margin-top:14px"><button class="btn warn" type="button" id="rgClear">Alle löschen</button><button class="btn pri" type="button" id="rgDone">Fertig</button></div>`);
   overlay.querySelectorAll("[data-rg]").forEach(sel => sel.onchange = () => {
@@ -733,6 +737,7 @@ function openRig() {
     if (sel.value) x.r[sel.dataset.rg] = sel.value; else delete x.r[sel.dataset.rg];
     rgSave(x);
   });
+  $("#lsearch").addEventListener("input", e => { SQ.rig = e.target.value; const x = rgLoad(); for (const k in r) delete r[k]; Object.assign(r, x.r || {}); overlay.querySelectorAll("[data-rg]").forEach(sel => { const pl = S.players.find(q => q.id === sel.dataset.rg); if (pl) { sel.innerHTML = opts(pl); sel.value = (x.r || {})[pl.id] || ""; } }); });
   $("#rgClear").onclick = () => { const x = rgLoad(); x.r = {}; rgSave(x); openRig(); };
   $("#rgDone").onclick = closeSheet;
 }
@@ -1109,7 +1114,7 @@ document.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click"
 document.addEventListener("click", e => { const b = e.target.closest(".chip.add"); if (b) openSheet("players"); });
 
 const overlay = $("#overlay");
-function closeSheet() { stopQr(); overlay.innerHTML = ""; countEdit = false; render(); }
+function closeSheet() { stopQr(); for (const k in SQ) delete SQ[k]; overlay.innerHTML = ""; countEdit = false; render(); }
 function sheet(title, body) {
   overlay.innerHTML = `<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-label="${esc(title)}"><h2>${esc(title)}<button class="x" type="button" aria-label="Schließen" id="closeX">✕</button></h2>${body}</div></div>`;
   $("#closeX").onclick = closeSheet;
@@ -1143,6 +1148,39 @@ function askCode(anchor, ok) {
   const f = document.getElementById("codeAsk"), i = document.getElementById("codeAskIn");
   setTimeout(() => i.focus(), 50);
   f.onsubmit = e => { e.preventDefault(); if (i.value === "0000") { f.remove(); ok(); } else { toast("Falscher Code."); i.value = ""; } };
+}
+// ---------- Suche in Listen ----------
+// Filtert die Einträge direkt im Fenster (Name, Zutaten, Kategorie). Der Suchtext bleibt pro Liste stehen, bis das Fenster zugeht.
+const SQ = {};
+const norm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const searchBox = (key, ph) => `<input type="search" class="lsearch" id="lsearch" data-sk="${key}" placeholder="${esc(ph || "Drink suchen …")}" value="${esc(SQ[key] || "")}" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search">`;
+function applySearch() {
+  const inp = overlay.querySelector("#lsearch"); if (!inp) return;
+  const q = norm(inp.value.trim()), words = q.split(/\s+/).filter(Boolean);
+  const box = overlay.querySelector(".sheet"); if (!box) return;
+  let any = 0, total = 0;
+  box.querySelectorAll(".drinkline, .srow").forEach(el => {
+    total++;
+    const ok = !words.length || words.every(w => norm(el.dataset.q || el.textContent).includes(w));
+    el.hidden = !ok; if (ok) any++;
+  });
+  // Überschriften ohne Treffer ausblenden
+  let head = null, has = 0, vis = 0;
+  const flush = () => { if (head && has) head.hidden = !vis; };
+  [...box.children].forEach(el => {
+    if (el.classList.contains("cathead")) { flush(); head = el; has = 0; vis = 0; }
+    else if (el.matches(".drinkline, .srow")) { has++; if (!el.hidden) vis++; }
+  });
+  flush();
+  let none = box.querySelector("#lsNone");
+  if (words.length && total && !any) { if (!none) inp.insertAdjacentHTML("afterend", `<p class="muted" id="lsNone">Nichts gefunden.</p>`); }
+  else if (none) none.remove();
+}
+function bindSearch() {
+  const inp = overlay.querySelector("#lsearch"); if (!inp) return;
+  inp.addEventListener("input", () => { SQ[inp.dataset.sk] = inp.value; applySearch(); });
+  inp.addEventListener("click", e => e.stopPropagation());
+  applySearch();
 }
 function openSheet(which) {
   if (spinning) return;
@@ -1220,23 +1258,24 @@ function openSheet(which) {
     const sorts = `<div class="mode" id="mySort" style="margin:10px 0 2px;grid-template-columns:1fr 1fr 1fr 1fr">${[["new", "Neueste"], ["best", "Beste"], ["open", "Offen"], ["fav", "♥ Favs"]].map(([k, l]) => `<button type="button" data-ms="${k}" class="${sort === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
     const favItems = () => {
       const rows = p.fav.filter(id => BY_ID[id]).map(id => { const d = BY_ID[id]; const hs2 = S.history.filter(h => h.pid === p.id && h.id === id); const best = Math.max(0, ...hs2.map(h => h.r || 0));
-        return `<div class="row"><div class="grow"><b>${esc(d.name)}</b>${tags(d)}<div class="muted">${esc(CATS[d.cat] || "")} · ${hs2.length ? hs2.length + "× getrunken" + (best ? " · " + "★".repeat(best) : "") : "noch nicht getrunken"}</div></div>${favBtn(id)}</div>`; }).join("");
+        return `<div class="row srow"><div class="grow"><b>${esc(d.name)}</b>${tags(d)}<div class="muted">${esc(CATS[d.cat] || "")} · ${hs2.length ? hs2.length + "× getrunken" + (best ? " · " + "★".repeat(best) : "") : "noch nicht getrunken"}</div></div>${favBtn(id)}</div>`; }).join("");
       const opts = Object.entries(CATS).map(([c, l]) => `<optgroup label="${esc(l)}">${DRINKS.filter(d => d.cat === c && !p.fav.includes(d.id)).map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join("")}</optgroup>`).join("");
       return `<label class="wahlrow"><span class="muted">Favorit hinzufügen</span><select id="favAdd"><option value="">Drink auswählen …</option>${opts}</select></label>${rows || `<p class="muted">Noch keine Favoriten. Herz bei einem Drink antippen oder oben einen auswählen.</p>`}`;
     };
     const items = sort === "fav" ? favItems() : hs.map(h => {
       const d = BY_ID[h.id];
       const t = new Date(h.t).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" });
-      return `<div class="row" style="flex-wrap:wrap"><div class="grow"><b>${esc(d.name)}</b>${tags(d)}<div class="muted">${esc(CATS[d.cat] || "")} · ${h.m ? "abgehakt " : ""}${t}</div></div><span style="display:inline-flex;align-items:center;gap:6px">${starsHTML(h)}${favBtn(h.id)}</span>${delBtn(h)}</div>`;
+      return `<div class="row srow" style="flex-wrap:wrap" data-q="${esc(d.name + " " + d.ing + " " + (CATS[d.cat] || ""))}"><div class="grow"><b>${esc(d.name)}</b>${tags(d)}<div class="muted">${esc(CATS[d.cat] || "")} · ${h.m ? "abgehakt " : ""}${t}</div></div><span style="display:inline-flex;align-items:center;gap:6px">${starsHTML(h)}${favBtn(h.id)}</span>${delBtn(h)}</div>`;
     }).join("");
     sheet("Meine Drinks", `${tabs}
       <div class="mysum"><div><b>${S.history.filter(h => h.pid === p.id && BY_ID[h.id]).length}</b><span>getrunken</span></div><div><b>${avg}</b><span>Ø Sterne</span></div><div><b>${S.history.filter(h => h.pid === p.id && BY_ID[h.id] && !h.r).length}</b><span>unbewertet</span></div></div>
-      ${sorts}
+      ${sorts}${searchBox("mine")}
       <p class="muted">Sterne antippen zum Bewerten oder Ändern, nochmal denselben Stern antippen löscht die Bewertung.${SY.code ? " Wird mit allen im Raum geteilt." : ""}</p>
       ${items || `<p class="muted">${sort === "open" ? "Alles bewertet. 🎉" : "Noch nichts gedreht."}</p>`}`);
     const reopen = () => { const y = overlay.querySelector(".sheet").scrollTop; openSheet("mine"); const sh = overlay.querySelector(".sheet"); if (sh) sh.scrollTop = y; };
     overlay.querySelectorAll("[data-fav]").forEach(b => b.onclick = () => { const id = b.dataset.fav; p.fav = p.fav.includes(id) ? p.fav.filter(x => x !== id) : [...p.fav, id]; save(); reopen(); });
     const fa = $("#favAdd"); if (fa) fa.onchange = () => { if (fa.value && !p.fav.includes(fa.value)) { p.fav = [...p.fav, fa.value]; save(); toast("♥ gemerkt"); } reopen(); };
+    bindSearch();
     overlay.querySelectorAll("[data-mp]").forEach(b => b.onclick = () => { S.myP = +b.dataset.mp; openSheet("mine"); });
     overlay.querySelectorAll("[data-ms]").forEach(b => b.onclick = () => { S.mySort = b.dataset.ms; openSheet("mine"); });
   }
@@ -1245,13 +1284,14 @@ function openSheet(which) {
     const items = S.history.slice(0, 200).map(h => {
       const d = BY_ID[h.id]; if (!d) return "";
       const t = new Date(h.t).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-      return `<div class="row" style="flex-wrap:wrap"><div class="grow"><b>${esc(pmap[h.pid] || "Entfernt")}</b> · ${esc(d.name)}${tags(d)} <span class="muted" style="font-variant-numeric:tabular-nums">${t}</span></div>${starsHTML(h)}${delBtn(h)}</div>`;
+      return `<div class="row srow" style="flex-wrap:wrap" data-q="${esc((pmap[h.pid] || "") + " " + d.name + " " + d.ing)}"><div class="grow"><b>${esc(pmap[h.pid] || "Entfernt")}</b> · ${esc(d.name)}${tags(d)} <span class="muted" style="font-variant-numeric:tabular-nums">${t}</span></div>${starsHTML(h)}${delBtn(h)}</div>`;
     }).join("");
     const per = S.players.map(p => `<div class="row"><div class="grow"><b>${esc(p.name)}</b><div class="muted">${p.seen.map(id => BY_ID[id] ? esc(BY_ID[id].name) : "").filter(Boolean).join(", ") || "noch nichts"}</div></div><span class="muted">${p.seen.length}</span></div>`).join("");
     const nOrph = S.history.filter(orphan).length;
     sheet("Verlauf", `${nOrph ? `<div class="row"><div class="grow"><b>${nOrph} Einträge ohne Haken</b><div class="muted">Stehen noch in Verlauf und Statistik, sind in der Abhaken-Liste aber nicht angehakt (Altlasten von früher).</div></div><button class="btn small warn delh" type="button" id="cleanOld">Aufräumen</button></div>` : ""}${S.history.length ? `<button class="btn small" type="button" id="undo">Letzten Dreh rückgängig</button>` : ""} ${S.history.some(h => h.rid) ? `<button class="btn small pri" type="button" id="lastOrder">Letzte Bestellung zeigen</button>` : ""}
       <div class="cathead">Pro Spieler</div>${per || `<p class="muted">Noch keine Spieler.</p>`}
-      <div class="cathead">Zuletzt gedreht <span class="muted">(Sterne antippen zum Bewerten, falsch eingetragen? Löschen)</span></div>${items || `<p class="muted">Noch nichts gedreht.</p>`}`);
+      <div class="cathead">Zuletzt gedreht <span class="muted">(Sterne antippen zum Bewerten, falsch eingetragen? Löschen)</span></div>${items ? searchBox("history", "Drink oder Name suchen …") : ""}${items || `<p class="muted">Noch nichts gedreht.</p>`}`);
+    bindSearch();
     const lr = S.history.find(h => h.rid); const ob = $("#lastOrder"); if (ob && lr) ob.onclick = () => showOrder(lr.rid);
     const u = $("#undo"); if (u) u.onclick = () => askCode(u, () => { undo(); openSheet("history"); });
     const cl = $("#cleanOld"); if (cl) cl.onclick = () => {
@@ -1351,7 +1391,8 @@ function openSheet(which) {
         return `<label class="drinkline"><input type="checkbox" data-ck="${esc(d.id)}" ${on ? "checked" : ""} aria-label="${esc(d.name)} getrunken"><div class="grow"><span class="name">${esc(d.name)}</span>${tags(d)}<div class="muted">${esc(d.ing)}</div></div>${ctr}</label>`;
       }).join("");
     }).join("");
-    sheet("Abhaken", `${tabs}<p class="muted"><b style="color:var(--gold);font-size:1.1rem">${done} / ${en.length}</b> Drinks schon getrunken. <a href="#" id="ckFilter" style="color:var(--sea)">Filter fürs Abhaken</a>. Die Zahl rechts zeigt, wie oft getrunken.  Abgehakte Drinks kommen für ${esc(p.name)} nicht mehr aufs Rad. Haken weg (mit Code) = Drink ist wieder drin und fliegt aus Verlauf und Statistik.</p><div class="row" id="ctrRow"><div class="grow muted">${countEdit ? "Zähler-Bearbeitung an: + und − ändern Verlauf und Statistik." : "Zähler ändern (mit Code)"}</div><button class="btn small ${countEdit ? "" : "pri"}" type="button" id="ctrBtn">${countEdit ? "Fertig" : "Bearbeiten"}</button></div>${groups}`);
+    sheet("Abhaken", `${tabs}${searchBox("check")}<p class="muted"><b style="color:var(--gold);font-size:1.1rem">${done} / ${en.length}</b> Drinks schon getrunken. <a href="#" id="ckFilter" style="color:var(--sea)">Filter fürs Abhaken</a>. Die Zahl rechts zeigt, wie oft getrunken.  Abgehakte Drinks kommen für ${esc(p.name)} nicht mehr aufs Rad. Haken weg (mit Code) = Drink ist wieder drin und fliegt aus Verlauf und Statistik.</p><div class="row" id="ctrRow"><div class="grow muted">${countEdit ? "Zähler-Bearbeitung an: + und − ändern Verlauf und Statistik." : "Zähler ändern (mit Code)"}</div><button class="btn small ${countEdit ? "" : "pri"}" type="button" id="ctrBtn">${countEdit ? "Fertig" : "Bearbeiten"}</button></div>${groups}`);
+    bindSearch();
     $("#ckFilter").onclick = e => { e.preventDefault(); S.fTab = "check"; openSheet("filter"); };
     overlay.querySelectorAll("[data-cp]").forEach(b => b.onclick = () => { S.checkP = +b.dataset.cp; save(); const y = overlay.querySelector(".sheet").scrollTop; openSheet("check"); });
     const reopenCk = () => { const y = overlay.querySelector(".sheet").scrollTop; openSheet("check"); const sh = overlay.querySelector(".sheet"); if (sh) sh.scrollTop = y; };
@@ -1391,8 +1432,8 @@ function openSheet(which) {
         return `<label class="drinkline ${off ? "off" : ""}"><input type="checkbox" data-ex="${esc(d.id)}" ${off ? "" : "checked"} aria-label="${esc(d.name)} im Rad"><div class="grow"><span class="name">${esc(d.name)}</span>${tags(d)}<div class="muted">${esc(d.ing)}</div></div></label>`;
       }).join("");
     }).join("");
-    sheet("Getränkekarte", `${filterAdmin ? "" : loginBox()}<p class="muted">${DRINKS.length} Drinks von der Bar-Karte. Haken weg = Drink kommt nie ins Rad (z. B. wenn ihn jemand nicht mag oder die Bar ihn nicht hat).</p>${groups}`);
-    bindLogin("menu");
+    sheet("Getränkekarte", `${filterAdmin ? "" : loginBox()}${searchBox("menu")}<p class="muted">${DRINKS.length} Drinks von der Bar-Karte. Haken weg = Drink kommt nie ins Rad (z. B. wenn ihn jemand nicht mag oder die Bar ihn nicht hat).</p>${groups}`);
+    bindLogin("menu"); bindSearch();
     if (!filterAdmin) overlay.querySelectorAll("[data-ex]").forEach(i => i.disabled = true);
     overlay.querySelectorAll("[data-ex]").forEach(cb => cb.addEventListener("change", () => {
       const id = cb.dataset.ex;
@@ -1969,7 +2010,7 @@ async function finishQr(data) {
 }
 
 // ---------- Start ----------
-const APP_BUILD = "27.11.2026, 21:45 Uhr"; // deutsche Zeit des Updates
+const APP_BUILD = "27.11.2026, 22:00 Uhr"; // deutsche Zeit des Updates
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · " + APP_BUILD;
 if (fixManual()) save();
 render();
