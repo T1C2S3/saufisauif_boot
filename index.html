@@ -303,6 +303,7 @@ const CATS = {
   best: "Best of Mein Schiff",
   long: "Crew's Longdrinks",
   pur: "Spirituosen pur",
+  shots: "Shots",
   bier: "Bier",
   wein: "Wein",
   schaum: "Sekt, Prosecco & Champagner",
@@ -430,6 +431,14 @@ const RAW = [
   ["Martini Bianco","Wermut · 5 cl",null,"pur",0],
   ["Martini Rosso","Wermut · 5 cl",null,"pur",0],
   ["Noilly Prat","Wermut · 5 cl","4,40 €","pur",0],
+  // Shots (alle inklusive)
+  ["Rot 99","Licor 43, Campari, Jägermeister",null,"shots",0],
+  ["Casanova","Brauner Rum, Kahlúa, Baileys Irish Cream, Sahne",null,"shots",0],
+  ["Sombrero","Tequila Silver, Licor 43, Maracujanektar",null,"shots",0],
+  ["Ti Amo","Eierlikör, Kahlúa",null,"shots",0],
+  ["Moly Night","Sambuca, Baileys Irish Cream",null,"shots",0],
+  ["Apfelstrudel","Licor 43, Apfelsaft, Sahne",null,"shots",0],
+  ["White Frog","Crème de Menthe White, Crème de Cacao White",null,"shots",0],
   // Spirituosen pur, zweite Karten-Seite (4 cl): Rum bis Bitter
   ["Saltwater's weißer Rum", "Rum · 4 cl", null, "pur", 0],
   ["Saltwater's brauner Rum", "Rum · 4 cl", null, "pur", 0],
@@ -501,7 +510,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "24"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "25"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -1351,13 +1360,14 @@ function spiritOf(d) {
   if (d.cat === "wein") return "Wein";
   if (d.cat === "schaum") return "Sekt & Champagner";
   for (const [n, re] of SPIRITS) if (re.test(d.ing)) return n;
-  if (/likör|bitter|aperol|campari|malibu|baileys|kahlúa|cointreau|cassis|martini|wermut|lillet|pimm|port/i.test(d.ing)) return "Likör & Bitter";
+  if (/likör|bitter|aperol|campari|malibu|baileys|kahlúa|cointreau|cassis|martini|wermut|lillet|pimm|port|sambuca|crème de|licor/i.test(d.ing)) return "Likör & Bitter";
   if (/sekt|wein|champagner|pils/i.test(d.ing)) return "Sekt & Wein";
   return null;
 }
 function spiritCl(d) {
   if (d.af) return 0;
   if (["bier", "wein", "schaum"].includes(d.cat)) return 0;
+  if (d.cat === "shots") return 4; // ein Shot = ca. 4 cl
   if (d.cat === "pur") return parseInt(d.ing.match(/(\d+) cl/)?.[1] || "4", 10);
   const n = SPIRITS.filter(([, re]) => re.test(d.ing)).length;
   if (n) return Math.min(n * 4, 10);
@@ -1903,7 +1913,7 @@ async function finishQr(data) {
 }
 
 // ---------- Start ----------
-const APP_BUILD = "27.11.2026, 10:45 Uhr"; // deutsche Zeit des Updates
+const APP_BUILD = "27.11.2026, 21:40 Uhr"; // deutsche Zeit des Updates
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · " + APP_BUILD;
 if (fixManual()) save();
 render();
