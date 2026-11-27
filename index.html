@@ -80,6 +80,9 @@ h1 span { color: var(--coral); }
 .chip.guest { color: var(--gold); border-style: dashed; border-color: var(--gold); }
 .tag.gast { background: var(--violet); color: #fff; }
 #modeSw { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.bgline { appearance: none; width: 100%; display: flex; align-items: center; gap: 8px; background: transparent; border: 1px solid var(--line); border-radius: 12px; padding: 6px 10px; color: var(--mist); font: 600 .8rem var(--body); text-align: left; }
+.bgline .bgsc { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.bgline.win { color: var(--gold); border-color: var(--gold); }
 .bgmini { background: var(--deck); border: 1.5px solid var(--line); border-radius: 16px; padding: 10px 12px; display: grid; gap: 8px; }
 .bgmini .bghead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .bggrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
@@ -514,7 +517,7 @@ const DRINKS = RAW.map(([name, ing, price, cat, af]) => ({ id: cat + ":" + slug(
 const BY_ID = Object.fromEntries(DRINKS.map(d => [d.id, d]));
 
 // ---------- Zustand ----------
-const APP_VERSION = "33"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
+const APP_VERSION = "34"; // bei jedem Update hochzählen (gleich wie VERSION in sw.js)
 const KEY = "drinkrad-flow-v1";
 let DEMO = false, REAL = null; // Demo-Modus: Änderungen landen nirgends (kein Speichern, kein Raum-Abgleich)
 const NAMES = ["Christoph","Mark","Tim","Julian"];
@@ -677,7 +680,7 @@ async function spin() {
   setBusy(false);
   if (d) {
     const h = lastSpinEntry;
-    confetti(); showResult(p, d, h, h && bingoOn() ? bingoAfter([h]) + `<div class="bgcard">${bingoGrid(p, d.id)}</div>` : "");
+    confetti(); showResult(p, d, h, h && bingoOn() ? bingoAfter([h]) : "");
     if (bingoOn() && S.bingo.won && prizePending()) { $("#rNext").textContent = "🏆 Cocktail wählen"; $("#rNext").onclick = () => { closeSheet(); openPrize(); }; }
     disq([{ p, d }]);
   }
@@ -900,10 +903,10 @@ function renderBingoMini() {
   if (!p) { el.innerHTML = ""; return; }
   ensureBingo();
   if (!bingoOn()) { el.innerHTML = ""; return; }
-  const w = bingoWinners(), q = w[0] || p;
-  el.innerHTML = `<div class="bgmini"><div class="bghead"><b>${w.length ? "🏆 " : "🎯 "}Bingo R${S.bingo.n || 1} · ${esc(q.name)} <span class="muted">${bingoCount(q)}/9</span></b><span style="display:flex;gap:6px;flex:0 0 auto">${w.length && prizePending() ? `<button class="btn small pri" type="button" id="bgPrize">🍸 Prämie</button> ` : ""}<button class="btn small" type="button" id="bgAll">Alle Karten</button></span></div>${bingoGrid(q)}</div>`;
-  $("#bgAll").onclick = openBingo;
-  if ($("#bgPrize")) $("#bgPrize").onclick = openPrize;
+  // dezent: eine Zeile mit Runde und Stand je Spieler, volle Karten erst per Antippen
+  const w = bingoWinners(), pend = w.length && prizePending();
+  el.innerHTML = `<button type="button" class="bgline${pend ? " win" : ""}" id="bgLine"><span>${w.length ? "🏆" : "🎯"} Bingo R${S.bingo.n || 1}</span><span class="bgsc">${w.length ? `${esc(w.map(q => q.name).join(" & "))} hat Bingo${pend ? " · Prämie" : ""}` : S.players.map(q => `${esc(q.name)} ${bingoCount(q)}`).join(" · ")}</span><span aria-hidden="true">›</span></button>`;
+  $("#bgLine").onclick = pend ? openPrize : openBingo;
 }
 function openBingo() {
   ensureBingo();
@@ -2026,7 +2029,7 @@ async function finishQr(data) {
 }
 
 // ---------- Start ----------
-const APP_BUILD = "27.11.2026, 23:30 Uhr"; // deutsche Zeit des Updates
+const APP_BUILD = "27.11.2026, 23:35 Uhr"; // deutsche Zeit des Updates
 document.getElementById("ver").textContent = "Version " + APP_VERSION + " · " + APP_BUILD;
 if (fixManual()) save();
 render();
